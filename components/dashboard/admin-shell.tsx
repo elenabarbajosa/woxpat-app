@@ -2,8 +2,9 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { labels } from "@/lib/labels";
+import { supabase } from "@/lib/supabase";
 
 function navLinkClass(isActive: boolean) {
   return isActive
@@ -20,13 +21,21 @@ interface AdminShellProps {
 
 export function AdminShell({ title, subtitle, actions, children }: AdminShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const isCreateEvent = pathname.startsWith("/admin/events/new");
   const isCategories = pathname.startsWith("/admin/categories");
   const isCommunity = pathname.startsWith("/admin/community");
+  const isSettings = pathname.startsWith("/admin/settings");
   const isDashboard =
     pathname === "/" ||
     pathname === "/admin" ||
     (pathname.startsWith("/admin/events/") && !isCreateEvent && !isCommunity);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push("/admin/login?loggedOut=1");
+    router.refresh();
+  }
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -48,9 +57,16 @@ export function AdminShell({ title, subtitle, actions, children }: AdminShellPro
             <Link href="/admin/community" className={navLinkClass(isCommunity)}>
               {labels.community}
             </Link>
-            <Link href="/admin/login" className={navLinkClass(false)}>
-              {labels.logout}
+            <Link href="/admin/settings" className={navLinkClass(isSettings)}>
+              Ajustes
             </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className={`${navLinkClass(false)} w-full text-left`}
+            >
+              {labels.logout}
+            </button>
           </nav>
         </aside>
 
