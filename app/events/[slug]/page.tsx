@@ -281,7 +281,7 @@ export default function EventDetailPage() {
       setConfirmedCount((current) => current + 1);
     }
 
-    if (!eventData.isPaid || registrationStatus === "waitlist") {
+    if (!eventData.isPaid && registrationStatus === "confirmed") {
       try {
         const emailResponse = await fetch("/api/send-confirmation", {
           method: "POST",
@@ -295,18 +295,22 @@ export default function EventDetailPage() {
             eventDate: eventData.date,
             eventTime: eventData.time,
             eventLocation: eventData.location,
-            registrationStatus:
-              registrationStatus === "waitlist" ? "waitlist" : "confirmed",
+            isPaid: false,
           }),
         });
 
         if (!emailResponse.ok) {
-          console.warn("Confirmation email request failed:", emailResponse.status);
+          console.warn(
+            "[email] Confirmation email request failed after free registration:",
+            emailResponse.status,
+          );
         }
       } catch (emailError) {
-        console.error("Confirmation email failed:", emailError);
+        console.error("[email] Confirmation email failed after free registration:", emailError);
       }
+    }
 
+    if (!eventData.isPaid || registrationStatus === "waitlist") {
       return { registrationStatus: registrationStatus === "waitlist" ? "waitlist" : "confirmed" };
     }
 

@@ -1,8 +1,9 @@
-import { Resend } from "resend";
+import {
+  sendEventConfirmationEmail,
+  splitFullName,
+} from "@/lib/email/send-event-confirmation";
 import { supabase } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 type SupabaseRegistrationRow = {
   id: string | number;
@@ -25,44 +26,8 @@ type SupabaseEventRow = {
   event_date: string | null;
   event_time: string | null;
   location: string | null;
+  price: number | null;
 };
-
-async function sendConfirmationEmail(options: {
-  fullName: string;
-  email: string;
-  eventTitle: string;
-  eventDate: string;
-  eventTime: string;
-  eventLocation: string;
-  registrationStatus: "confirmed" | "waitlist";
-}) {
-  const fromEmail = process.env.RESEND_FROM_EMAIL ?? "Woxpat <onboarding@resend.dev>";
-  const statusLabel =
-    options.registrationStatus === "confirmed"
-      ? "Your registration is confirmed."
-      : "You are currently on the waitlist.";
-
-  const { error } = await resend.emails.send({
-    from: fromEmail,
-    to: options.email,
-    subject: `Woxpat registration: ${options.eventTitle}`,
-    html: `
-      <p>Hi ${options.fullName},</p>
-      <p>Thanks for registering with Woxpat.</p>
-      <p><strong>${statusLabel}</strong></p>
-      <hr />
-      <p><strong>Event:</strong> ${options.eventTitle}</p>
-      <p><strong>Date:</strong> ${options.eventDate}</p>
-      <p><strong>Time:</strong> ${options.eventTime}</p>
-      <p><strong>Location:</strong> ${options.eventLocation}</p>
-      <p><strong>Status:</strong> ${options.registrationStatus}</p>
-    `,
-  });
-
-  if (error) {
-    throw new Error(error.message || "Failed to send email.");
-  }
-}
 
 export async function POST(request: Request) {
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
@@ -90,6 +55,7 @@ export async function POST(request: Request) {
   const session = event.data.object as {
     metadata?: Record<string, string> | null;
     payment_status?: string | null;
+    amount_total?: number | null;
   };
 
   if (session.payment_status !== "paid") {
@@ -161,7 +127,7 @@ export async function POST(request: Request) {
       supabase.from("clients").select("id,full_name,email").eq("id", clientId).maybeSingle(),
       supabase
         .from("events")
-        .select("id,title,slug,event_date,event_time,location")
+        .select("id,title,slug,event_date,event_time,location,price")
         .eq("id", eventId)
         .maybeSingle(),
     ]);
@@ -173,24 +139,28 @@ export async function POST(request: Request) {
 
   const client = clientRow as SupabaseClientRow;
   const eventData = eventRow as SupabaseEventRow;
+  const { firstName, lastName } = splitFullName(client.full_name ?? "");
+  const amount =
+    session.amount_total != null ? session.amount_total / 100 : Number(eventData.price ?? 0);
 
-  const registrationStatus = "confirmed" as const;
+  const emailResult = await sendEventConfirmationEmail({
+    to: client.email ?? "",
+    firstName,
+    lastName,
+    eventName: eventData.title ?? eventData.slug ?? "Evento Woxpat",
+    eventDate: eventData.event_date ?? "Por confirmar",
+    eventTime: eventData.event_time,
+    eventLocation: eventData.location,
+    isPaid: true,
+    amount,
+  });
 
-  try {
-    await sendConfirmationEmail({
-      fullName: client.full_name ?? "Guest",
-      email: client.email ?? "",
-      eventTitle: eventData.title ?? eventData.slug ?? "Woxpat event",
-      eventDate: eventData.event_date ?? "TBD",
-      eventTime: eventData.event_time ?? "TBD",
-      eventLocation: eventData.location ?? "Location pending",
-      registrationStatus,
+  if (!emailResult.success) {
+    console.error("[email] Payment confirmed but confirmation email failed:", {
+      registrationId: matchedRegistrationId,
+      error: emailResult.error,
     });
-  } catch (emailError) {
-    console.error("Confirmation email failed after payment:", emailError);
-    return Response.json({ error: "Payment confirmed but email failed." }, { status: 500 });
   }
 
   return Response.json({ received: true });
 }
-
