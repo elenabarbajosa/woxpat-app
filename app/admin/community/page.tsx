@@ -56,9 +56,24 @@ function formatDate(iso: string | null) {
   if (!iso) return "-";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "-";
-  return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "2-digit" }).format(
+  return new Intl.DateTimeFormat("es-ES", { year: "numeric", month: "short", day: "2-digit" }).format(
     date,
   );
+}
+
+function getRegistrationStatusLabel(status: ContactView["status"]): string {
+  switch (status) {
+    case "confirmed":
+      return "Confirmado";
+    case "waitlist":
+      return "Lista de espera";
+    case "pending":
+      return "Pendiente de pago";
+    case "cancelled":
+      return "Cancelado";
+    default:
+      return "Desconocido";
+  }
 }
 
 function classNames(...values: Array<string | false | null | undefined>) {
@@ -107,7 +122,7 @@ export default function AdminCommunityPage() {
       .limit(1000);
 
     if (registrationsError) {
-      setContactsError("Could not load contacts from registrations.");
+      setContactsError("No se pudieron cargar los contactos.");
       setContacts([]);
       setContactsLoading(false);
       return;
@@ -139,7 +154,7 @@ export default function AdminCommunityPage() {
         .in("id", clientIds);
 
       if (clientsError) {
-        setContactsError("Could not load contact details.");
+        setContactsError("No se pudieron cargar los datos de contacto.");
         setContacts([]);
         setContactsLoading(false);
         return;
@@ -162,7 +177,7 @@ export default function AdminCommunityPage() {
         .in("id", eventIds);
 
       if (eventsError) {
-        setContactsError("Could not load event details.");
+        setContactsError("No se pudieron cargar los datos del evento.");
         setContacts([]);
         setContactsLoading(false);
         return;
@@ -184,10 +199,10 @@ export default function AdminCommunityPage() {
       return {
         registrationId: String(registration.id),
         clientId: registration.client_id ? String(registration.client_id) : null,
-        fullName: client?.full_name ?? "Unknown attendee",
-        email: client?.email ?? "No email",
+        fullName: client?.full_name ?? "Asistente desconocido",
+        email: client?.email ?? "Sin email",
         phone: client?.phone ?? "-",
-        eventTitle: event?.title ?? event?.slug ?? "Event",
+        eventTitle: event?.title ?? event?.slug ?? "Evento",
         eventSlug: event?.slug ?? null,
         status,
         createdAt: registration.created_at ?? null,
@@ -209,14 +224,14 @@ export default function AdminCommunityPage() {
       ]);
 
     if (groupsError) {
-      setGroupsError("Could not load groups.");
+      setGroupsError("No se pudieron cargar los grupos.");
       setGroups([]);
       setGroupsLoading(false);
       return;
     }
 
     if (membersError) {
-      setGroupsError("Could not load group counts.");
+      setGroupsError("No se pudieron cargar los recuentos de grupos.");
       setGroups([]);
       setGroupsLoading(false);
       return;
@@ -244,7 +259,7 @@ export default function AdminCommunityPage() {
       .order("created_at", { ascending: false });
 
     if (membersError) {
-      setGroupMembersError("Could not load group members.");
+      setGroupMembersError("No se pudieron cargar los miembros del grupo.");
       setGroupMembersLoading(false);
       return;
     }
@@ -263,7 +278,7 @@ export default function AdminCommunityPage() {
       .in("id", registrationIds);
 
     if (registrationsError) {
-      setGroupMembersError("Could not load member registrations.");
+      setGroupMembersError("No se pudieron cargar las inscripciones de los miembros.");
       setGroupMembersLoading(false);
       return;
     }
@@ -302,7 +317,7 @@ export default function AdminCommunityPage() {
         .in("id", clientIds);
 
       if (clientsError) {
-        setGroupMembersError("Could not load member details.");
+        setGroupMembersError("No se pudieron cargar los datos de los miembros.");
         setGroupMembersLoading(false);
         return;
       }
@@ -324,7 +339,7 @@ export default function AdminCommunityPage() {
         .in("id", eventIds);
 
       if (eventsError) {
-        setGroupMembersError("Could not load event details.");
+        setGroupMembersError("No se pudieron cargar los datos del evento.");
         setGroupMembersLoading(false);
         return;
       }
@@ -348,10 +363,10 @@ export default function AdminCommunityPage() {
         return {
           registrationId: String(registration.id),
           clientId: registration.client_id ? String(registration.client_id) : null,
-          fullName: client?.full_name ?? "Unknown attendee",
-          email: client?.email ?? "No email",
+          fullName: client?.full_name ?? "Asistente desconocido",
+          email: client?.email ?? "Sin email",
           phone: client?.phone ?? "-",
-          eventTitle: event?.title ?? event?.slug ?? "Event",
+          eventTitle: event?.title ?? event?.slug ?? "Evento",
           eventSlug: event?.slug ?? null,
           status,
           createdAt: registration.created_at ?? null,
@@ -408,13 +423,13 @@ export default function AdminCommunityPage() {
 
     const groupId = targetGroupId || selectedGroupId || "";
     if (!groupId) {
-      setAddToGroupMessage("Select a group first.");
+      setAddToGroupMessage("Selecciona un grupo primero.");
       return;
     }
 
     const registrationIds = Array.from(selectedRegistrationIds);
     if (registrationIds.length === 0) {
-      setAddToGroupMessage("Select at least one attendee.");
+      setAddToGroupMessage("Selecciona al menos un asistente.");
       return;
     }
 
@@ -430,11 +445,13 @@ export default function AdminCommunityPage() {
         .upsert(payload, { onConflict: "group_id,registration_id", ignoreDuplicates: true });
 
       if (error) {
-        setAddToGroupMessage("Could not add members to group.");
+        setAddToGroupMessage("No se pudieron añadir miembros al grupo.");
         return;
       }
 
-      setAddToGroupMessage(`Added ${registrationIds.length} member${registrationIds.length === 1 ? "" : "s"} to the group.`);
+      setAddToGroupMessage(
+        `Se ${registrationIds.length === 1 ? "añadió" : "añadieron"} ${registrationIds.length} miembro${registrationIds.length === 1 ? "" : "s"} al grupo.`,
+      );
       clearSelection();
       await fetchGroupsAndCounts();
       if (selectedGroupId === groupId) {
@@ -460,7 +477,7 @@ export default function AdminCommunityPage() {
         .single();
 
       if (error || !data) {
-        setGroupsError("Could not create group.");
+        setGroupsError("No se pudo crear el grupo.");
         return;
       }
 
@@ -481,7 +498,7 @@ export default function AdminCommunityPage() {
     try {
       const { error } = await supabase.from("community_groups").delete().eq("id", groupId);
       if (error) {
-        setGroupsError("Could not delete group.");
+        setGroupsError("No se pudo eliminar el grupo.");
         return;
       }
 
@@ -510,7 +527,7 @@ export default function AdminCommunityPage() {
         .eq("registration_id", candidateId);
 
       if (error) {
-        setGroupMembersError("Could not remove member.");
+        setGroupMembersError("No se pudo quitar al miembro.");
         return;
       }
 
@@ -530,8 +547,8 @@ export default function AdminCommunityPage() {
 
   return (
     <AdminShell
-      title="Community"
-      subtitle="Create groups and organize attendees from existing registrations."
+      title="Comunidad"
+      subtitle="Crea grupos y organiza asistentes a partir de las inscripciones."
       actions={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
@@ -544,7 +561,7 @@ export default function AdminCommunityPage() {
                 : "border-transparent bg-zinc-100 text-zinc-700 hover:bg-zinc-200",
             )}
           >
-            All contacts
+            Todos los contactos
           </button>
           <button
             type="button"
@@ -556,19 +573,19 @@ export default function AdminCommunityPage() {
                 : "border-transparent bg-zinc-100 text-zinc-700 hover:bg-zinc-200",
             )}
           >
-            Groups
+            Grupos
           </button>
         </div>
       }
     >
       {activeTab === "contacts" ? (
-        <section className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+        <section className="min-w-0 rounded-2xl border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-200 px-5 py-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
               <div className="flex-1">
-                <h2 className="text-lg font-semibold text-zinc-900">All contacts</h2>
+                <h2 className="text-lg font-semibold text-zinc-900">Todos los contactos</h2>
                 <p className="mt-1 text-sm text-zinc-600">
-                  Select attendees (registrations) and add them to groups.
+                  Selecciona asistentes (inscripciones) y añádelos a grupos.
                 </p>
               </div>
 
@@ -578,16 +595,16 @@ export default function AdminCommunityPage() {
                   onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
                   className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none ring-[color:var(--accent-ring)] focus:ring-2"
                 >
-                  <option value="all">All statuses</option>
-                  <option value="confirmed">Confirmed</option>
-                  <option value="waitlist">Waitlist</option>
-                  <option value="pending">Pending</option>
-                  <option value="cancelled">Cancelled</option>
+                  <option value="all">Todos los estados</option>
+                  <option value="confirmed">Confirmado</option>
+                  <option value="waitlist">Lista de espera</option>
+                  <option value="pending">Pendiente de pago</option>
+                  <option value="cancelled">Cancelado</option>
                 </select>
                 <input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search name, email, event…"
+                  placeholder="Buscar por nombre, email o evento…"
                   className="h-10 w-full rounded-lg border border-zinc-300 px-3 text-sm outline-none ring-[color:var(--accent-ring)] transition focus:ring-2 sm:w-72"
                 />
               </div>
@@ -598,7 +615,7 @@ export default function AdminCommunityPage() {
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-sm text-zinc-700">
-                  {selectedCount === 0 ? "No selection" : `${selectedCount} selected`}
+                  {selectedCount === 0 ? "Sin selección" : `${selectedCount} seleccionado${selectedCount === 1 ? "" : "s"}`}
                 </p>
                 {selectedCount > 0 ? (
                   <button
@@ -606,7 +623,7 @@ export default function AdminCommunityPage() {
                     onClick={clearSelection}
                     className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
                   >
-                    Clear
+                    Limpiar
                   </button>
                 ) : null}
               </div>
@@ -617,7 +634,7 @@ export default function AdminCommunityPage() {
                   onChange={(event) => setTargetGroupId(event.target.value)}
                   className="h-10 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-700 outline-none ring-[color:var(--accent-ring)] focus:ring-2"
                 >
-                  <option value="">Add to group…</option>
+                  <option value="">Añadir a grupo…</option>
                   {groupOptions.map((group) => (
                     <option key={group.id} value={group.id}>
                       {group.name}
@@ -630,7 +647,7 @@ export default function AdminCommunityPage() {
                   disabled={addingToGroup || selectedCount === 0 || groups.length === 0}
                   className="h-10 rounded-lg bg-[var(--accent-button)] px-4 text-sm font-medium text-[var(--on-accent)] transition hover:bg-[var(--accent-button-hover)] active:bg-[var(--accent-button-pressed)] disabled:cursor-not-allowed disabled:bg-zinc-400"
                 >
-                  {addingToGroup ? "Adding..." : "Add"}
+                  {addingToGroup ? "Añadiendo..." : "Añadir"}
                 </button>
               </div>
             </div>
@@ -639,22 +656,22 @@ export default function AdminCommunityPage() {
 
           <div className="overflow-x-auto">
             {contactsLoading ? (
-              <p className="px-5 py-6 text-sm text-zinc-600">Loading contacts…</p>
+              <p className="px-5 py-6 text-sm text-zinc-600">Cargando contactos…</p>
             ) : contactsError ? (
               <p className="px-5 py-6 text-sm text-rose-600">{contactsError}</p>
             ) : filteredContacts.length === 0 ? (
-              <p className="px-5 py-6 text-sm text-zinc-600">No contacts match your filters.</p>
+              <p className="px-5 py-6 text-sm text-zinc-600">Ningún contacto coincide con los filtros.</p>
             ) : (
               <table className="w-full min-w-[980px] text-left text-sm">
                 <thead className="bg-zinc-50 text-zinc-500">
                   <tr>
                     <th className="w-[40px] px-5 py-3 font-medium">
-                      <span className="sr-only">Select</span>
+                      <span className="sr-only">Seleccionar</span>
                     </th>
-                    <th className="w-[28%] min-w-[260px] px-4 py-3 font-medium">Attendee</th>
-                    <th className="w-[28%] min-w-[260px] px-4 py-3 font-medium">Event</th>
-                    <th className="w-[120px] px-4 py-3 font-medium">Status</th>
-                    <th className="w-[140px] px-5 py-3 font-medium">Registered</th>
+                    <th className="w-[28%] min-w-[260px] px-4 py-3 font-medium">Asistente</th>
+                    <th className="w-[28%] min-w-[260px] px-4 py-3 font-medium">Evento</th>
+                    <th className="w-[120px] px-4 py-3 font-medium">Estado</th>
+                    <th className="w-[140px] px-5 py-3 font-medium">Registrado</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -668,7 +685,7 @@ export default function AdminCommunityPage() {
                             checked={isChecked}
                             onChange={() => toggleSelected(contact.registrationId)}
                             className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-[var(--accent)] focus:ring-[var(--accent)]"
-                            aria-label={`Select ${contact.fullName}`}
+                            aria-label={`Seleccionar ${contact.fullName}`}
                           />
                         </td>
                         <td className="px-4 py-3 align-top">
@@ -684,7 +701,7 @@ export default function AdminCommunityPage() {
                         <td className="px-4 py-3 align-top">
                           <span
                             className={classNames(
-                              "inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+                              "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
                               contact.status === "confirmed"
                                 ? "bg-emerald-50 text-emerald-700"
                                 : contact.status === "waitlist"
@@ -696,7 +713,7 @@ export default function AdminCommunityPage() {
                                       : "bg-zinc-100 text-zinc-700",
                             )}
                           >
-                            {contact.status}
+                            {getRegistrationStatusLabel(contact.status)}
                           </span>
                         </td>
                         <td className="px-5 py-3 align-top text-zinc-700">{formatDate(contact.createdAt)}</td>
@@ -709,20 +726,20 @@ export default function AdminCommunityPage() {
           </div>
         </section>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
-          <section className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
+          <section className="min-w-0 rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <div className="border-b border-zinc-200 px-5 py-4">
-              <h2 className="text-lg font-semibold text-zinc-900">Groups</h2>
-              <p className="mt-1 text-sm text-zinc-600">Create and manage attendee groups.</p>
+              <h2 className="text-lg font-semibold text-zinc-900">Grupos</h2>
+              <p className="mt-1 text-sm text-zinc-600">Crea y gestiona grupos de asistentes.</p>
             </div>
 
             <div className="border-b border-zinc-200 px-5 py-4">
-              <label className="block text-sm font-medium text-zinc-700">New group</label>
+              <label className="block text-sm font-medium text-zinc-700">Nuevo grupo</label>
               <div className="mt-2 flex gap-2">
                 <input
                   value={newGroupName}
                   onChange={(event) => setNewGroupName(event.target.value)}
-                  placeholder="e.g. Lisbon founders"
+                  placeholder="p. ej. Emprendedoras de Lisboa"
                   className="h-10 flex-1 rounded-lg border border-zinc-300 px-3 text-sm outline-none ring-[color:var(--accent-ring)] transition focus:ring-2"
                 />
                 <button
@@ -731,7 +748,7 @@ export default function AdminCommunityPage() {
                   disabled={creatingGroup || newGroupName.trim().length === 0}
                   className="h-10 rounded-lg bg-[var(--accent-button)] px-4 text-sm font-medium text-[var(--on-accent)] transition hover:bg-[var(--accent-button-hover)] active:bg-[var(--accent-button-pressed)] disabled:cursor-not-allowed disabled:bg-zinc-400"
                 >
-                  {creatingGroup ? "Creating..." : "Create"}
+                  {creatingGroup ? "Creando..." : "Crear"}
                 </button>
               </div>
               {groupsError ? <p className="mt-2 text-sm text-rose-600">{groupsError}</p> : null}
@@ -739,9 +756,11 @@ export default function AdminCommunityPage() {
 
             <div className="px-2 py-2">
               {groupsLoading ? (
-                <p className="px-3 py-4 text-sm text-zinc-600">Loading groups…</p>
+                <p className="px-3 py-4 text-sm text-zinc-600">Cargando grupos…</p>
               ) : groups.length === 0 ? (
-                <p className="px-3 py-4 text-sm text-zinc-600">No groups yet. Create one to get started.</p>
+                <p className="px-3 py-4 text-sm text-zinc-600">
+                  Aún no hay grupos. Crea uno para empezar.
+                </p>
               ) : (
                 <ul className="space-y-1">
                   {groups.map((group) => {
@@ -760,7 +779,7 @@ export default function AdminCommunityPage() {
                             <div>
                               <p className="text-sm font-medium text-zinc-900">{group.name}</p>
                               <p className="mt-0.5 text-xs text-zinc-500">
-                                {group.memberCount} member{group.memberCount === 1 ? "" : "s"}
+                                {group.memberCount} miembro{group.memberCount === 1 ? "" : "s"}
                               </p>
                             </div>
                             <span className="text-xs text-zinc-400">{formatDate(group.created_at)}</span>
@@ -774,17 +793,17 @@ export default function AdminCommunityPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
+          <section className="min-w-0 rounded-2xl border border-zinc-200 bg-white shadow-sm">
             <div className="border-b border-zinc-200 px-5 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-semibold text-zinc-900">
-                    {selectedGroup ? selectedGroup.name : "Select a group"}
+                    {selectedGroup ? selectedGroup.name : "Selecciona un grupo"}
                   </h3>
                   <p className="mt-1 text-sm text-zinc-600">
                     {selectedGroup
-                      ? "Manage members for this group."
-                      : "Choose a group on the left to view and manage members."}
+                      ? "Gestiona los miembros de este grupo."
+                      : "Elige un grupo a la izquierda para ver y gestionar sus miembros."}
                   </p>
                 </div>
                 {selectedGroup ? (
@@ -797,7 +816,7 @@ export default function AdminCommunityPage() {
                       }}
                       className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
                     >
-                      Add members
+                      Añadir miembros
                     </button>
                     <button
                       type="button"
@@ -805,7 +824,7 @@ export default function AdminCommunityPage() {
                       disabled={Boolean(deletingGroupId)}
                       className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {deletingGroupId === selectedGroup.id ? "Deleting..." : "Delete group"}
+                      {deletingGroupId === selectedGroup.id ? "Eliminando..." : "Eliminar grupo"}
                     </button>
                   </div>
                 ) : null}
@@ -814,14 +833,14 @@ export default function AdminCommunityPage() {
 
             <div className="px-5 py-6">
               {!selectedGroup ? null : groupMembersLoading ? (
-                <p className="text-sm text-zinc-600">Loading members…</p>
+                <p className="text-sm text-zinc-600">Cargando miembros…</p>
               ) : groupMembersError ? (
                 <p className="text-sm text-rose-600">{groupMembersError}</p>
               ) : groupMembers.length === 0 ? (
                 <div>
-                  <p className="text-sm font-medium text-zinc-800">No members yet</p>
+                  <p className="text-sm font-medium text-zinc-800">Aún no hay miembros</p>
                   <p className="mt-1 text-sm text-zinc-600">
-                    Use “Add members” to select attendees from registrations.
+                    Usa «Añadir miembros» para seleccionar asistentes de las inscripciones.
                   </p>
                 </div>
               ) : (
@@ -843,7 +862,7 @@ export default function AdminCommunityPage() {
                         disabled={removingMemberId === member.registrationId}
                         className="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {removingMemberId === member.registrationId ? "Removing..." : "Remove"}
+                        {removingMemberId === member.registrationId ? "Quitando..." : "Quitar"}
                       </button>
                     </li>
                   ))}

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AdminShell } from "@/components/dashboard/admin-shell";
+import { formatPublicEventDateTime } from "@/lib/date-utils";
+import { getRemainingSpots } from "@/lib/event-capacity";
+import { getCancelRegistrationConfirmMessage, getRegistrationStatusLabel, labels } from "@/lib/labels";
+import { resolveRegistrationPaymentStatus } from "@/lib/registration-utils";
 import { supabase } from "@/lib/supabase";
 
 type SupabaseEventRow = {
@@ -42,17 +46,109 @@ type AttendeeView = {
   fullName: string;
   email: string;
   phone: string;
-  status: "confirmed" | "cancelled";
+  status: "confirmed" | "waitlist" | "pending" | "cancelled" | "unknown";
   createdAt: string | null;
 };
+
+const ATTENDEE_STATUS_ORDER: Record<AttendeeView["status"], number> = {
+  confirmed: 0,
+  waitlist: 1,
+  pending: 2,
+  cancelled: 3,
+  unknown: 4,
+};
+
+function normalizeRegistrationStatus(
+  status: RegistrationRow["status"],
+): AttendeeView["status"] {
+  if (
+    status === "confirmed" ||
+    status === "waitlist" ||
+    status === "pending" ||
+    status === "cancelled"
+  ) {
+    return status;
+  }
+  return "unknown";
+}
 
 function badgeClass(status: AttendeeView["status"]) {
   switch (status) {
     case "confirmed":
       return "bg-emerald-50 text-emerald-700";
+    case "waitlist":
+      return "bg-amber-50 text-amber-700";
+    case "pending":
+      return "bg-blue-50 text-blue-700";
     case "cancelled":
       return "bg-zinc-100 text-zinc-700";
+    default:
+      return "bg-zinc-100 text-zinc-700";
   }
+}
+
+function sortAttendees(rows: AttendeeView[]) {
+  return [...rows].sort((a, b) => {
+    const statusDiff = ATTENDEE_STATUS_ORDER[a.status] - ATTENDEE_STATUS_ORDER[b.status];
+    if (statusDiff !== 0) return statusDiff;
+
+    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return aTime - bTime;
+  });
+}
+
+async function loadAttendeesForEvent(eventId: string | number) {
+  const { data: registrationsData, error: registrationsError } = await supabase
+    .from("registrations")
+    .select("id,client_id,status,created_at")
+    .eq("event_id", String(eventId))
+    .order("created_at", { ascending: true });
+
+  if (registrationsError) {
+    return { attendees: null, error: registrationsError };
+  }
+
+  const registrationRows = (registrationsData as RegistrationRow[] | null) ?? [];
+  const clientIds = registrationRows
+    .map((registration) => registration.client_id)
+    .filter((clientId): clientId is string | number => Boolean(clientId))
+    .map(String);
+
+  let clientsById: Record<string, ClientRow> = {};
+
+  if (clientIds.length > 0) {
+    const { data: clientsData, error: clientsError } = await supabase
+      .from("clients")
+      .select("id,full_name,email,phone")
+      .in("id", clientIds);
+
+    if (clientsError) {
+      return { attendees: null, error: clientsError };
+    }
+
+    clientsById = ((clientsData as ClientRow[] | null) ?? []).reduce(
+      (accumulator, client) => {
+        accumulator[String(client.id)] = client;
+        return accumulator;
+      },
+      {} as Record<string, ClientRow>,
+    );
+  }
+
+  const attendeeRows = registrationRows.map((registration) => {
+    const client = clientsById[String(registration.client_id ?? "")];
+    return {
+      id: String(registration.id),
+      fullName: client?.full_name ?? "Asistente desconocido",
+      email: client?.email ?? "Sin email",
+      phone: client?.phone ?? "-",
+      status: normalizeRegistrationStatus(registration.status),
+      createdAt: registration.created_at ?? null,
+    } satisfies AttendeeView;
+  });
+
+  return { attendees: sortAttendees(attendeeRows), error: null };
 }
 
 function slugifyFilename(value: string) {
@@ -80,6 +176,22 @@ export default function AdminAttendeesPage() {
   const [copied, setCopied] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [sendingPaymentLinkId, setSendingPaymentLinkId] = useState<string | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<{
+    level: "success" | "warning" | "error";
+    message: string;
+  } | null>(null);
+
+  const isPaidEvent = Boolean(eventRow?.is_paid ?? (Number(eventRow?.price ?? 0) > 0));
+  const waitlistCount = attendees.filter((attendee) => attendee.status === "waitlist").length;
+  const confirmedCount = attendees.filter((attendee) => attendee.status === "confirmed").length;
+  const pendingCount = attendees.filter((attendee) => attendee.status === "pending").length;
+  const registrationCounts = {
+    confirmed: confirmedCount,
+    pending: pendingCount,
+    waitlist: waitlistCount,
+  };
+  const remainingSpots = getRemainingSpots(eventRow?.capacity ?? 0, registrationCounts, isPaidEvent);
 
   useEffect(() => {
     let isMounted = true;
@@ -106,7 +218,7 @@ export default function AdminAttendeesPage() {
       if (!isMounted) return;
 
       if (error) {
-        setErrorMessage("Could not load this event.");
+        setErrorMessage(labels.couldNotLoadEvent);
         setEventRow(null);
         setIsLoading(false);
         return;
@@ -122,63 +234,15 @@ export default function AdminAttendeesPage() {
       const event = data as SupabaseEventRow;
       setEventRow(event);
 
-      const { data: registrationsData, error: registrationsError } = await supabase
-        .from("registrations")
-        .select("id,client_id,status,created_at")
-        .eq("event_id", String(event.id))
-        .in("status", ["confirmed", "cancelled"])
-        .order("created_at", { ascending: true });
+      const { attendees: loadedAttendees, error: loadError } = await loadAttendeesForEvent(event.id);
 
-      if (registrationsError) {
-        setErrorMessage("Could not load attendees.");
+      if (loadError) {
+        setErrorMessage(labels.couldNotLoadAttendees);
         setIsLoading(false);
         return;
       }
 
-      const registrationRows = (registrationsData as RegistrationRow[] | null) ?? [];
-      const clientIds = registrationRows
-        .map((registration) => registration.client_id)
-        .filter((clientId): clientId is string | number => Boolean(clientId))
-        .map(String);
-
-      let clientsById: Record<string, ClientRow> = {};
-
-      if (clientIds.length > 0) {
-        const { data: clientsData, error: clientsError } = await supabase
-          .from("clients")
-          .select("id,full_name,email,phone")
-          .in("id", clientIds);
-
-        if (clientsError) {
-          setErrorMessage("Could not load attendee details.");
-          setIsLoading(false);
-          return;
-        }
-
-        clientsById = ((clientsData as ClientRow[] | null) ?? []).reduce(
-          (accumulator, client) => {
-            accumulator[String(client.id)] = client;
-            return accumulator;
-          },
-          {} as Record<string, ClientRow>,
-        );
-      }
-
-      const attendeeRows = registrationRows.map((registration) => {
-        const client = clientsById[String(registration.client_id ?? "")];
-        const status: AttendeeView["status"] =
-          registration.status === "cancelled" ? "cancelled" : "confirmed";
-        return {
-          id: String(registration.id),
-          fullName: client?.full_name ?? "Unknown attendee",
-          email: client?.email ?? "No email",
-          phone: client?.phone ?? "-",
-          status,
-          createdAt: registration.created_at ?? null,
-        } as AttendeeView;
-      });
-
-      setAttendees(attendeeRows);
+      setAttendees(loadedAttendees ?? []);
       setIsLoading(false);
     }
 
@@ -193,60 +257,174 @@ export default function AdminAttendeesPage() {
     if (!eventRow) return;
     setErrorMessage(null);
 
-    const { data: registrationsData, error: registrationsError } = await supabase
-      .from("registrations")
-      .select("id,client_id,status,created_at")
-      .eq("event_id", String(eventRow.id))
-      .in("status", ["confirmed", "cancelled"])
-      .order("created_at", { ascending: true });
+    const { attendees: loadedAttendees, error: loadError } = await loadAttendeesForEvent(eventRow.id);
 
-    if (registrationsError) {
-      setErrorMessage("Could not refresh attendees.");
+    if (loadError) {
+      setErrorMessage(labels.couldNotRefreshAttendees);
       return;
     }
 
-    const registrationRows = (registrationsData as RegistrationRow[] | null) ?? [];
-    const clientIds = registrationRows
-      .map((registration) => registration.client_id)
-      .filter((clientId): clientId is string | number => Boolean(clientId))
-      .map(String);
+    setAttendees(loadedAttendees ?? []);
+  }
 
-    let clientsById: Record<string, ClientRow> = {};
-    if (clientIds.length > 0) {
-      const { data: clientsData, error: clientsError } = await supabase
-        .from("clients")
-        .select("id,full_name,email,phone")
-        .in("id", clientIds);
+  async function requestWaitlistPaymentLink(options: {
+    registrationId: string;
+    requireAvailableSpot?: boolean;
+    resend?: boolean;
+    successMessage?: string;
+  }): Promise<{ level: "success" | "warning" | "error"; message: string }> {
+    try {
+      const response = await fetch("/api/admin/send-waitlist-payment-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registrationId: options.registrationId,
+          requireAvailableSpot: options.requireAvailableSpot,
+          resend: options.resend ?? false,
+          successMessage: options.successMessage,
+        }),
+      });
 
-      if (clientsError) {
-        setErrorMessage("Could not refresh attendee details.");
-        return;
-      }
+      const body = (await response.json()) as {
+        level?: "success" | "warning" | "error";
+        message?: string;
+      };
 
-      clientsById = ((clientsData as ClientRow[] | null) ?? []).reduce(
-        (accumulator, client) => {
-          accumulator[String(client.id)] = client;
-          return accumulator;
-        },
-        {} as Record<string, ClientRow>,
-      );
+      return {
+        level: body.level ?? "error",
+        message: body.message ?? labels.couldNotSendPaymentLink,
+      };
+    } catch (error) {
+      console.error("[waitlist-payment] Admin request failed:", error);
+      return { level: "error", message: labels.couldNotSendPaymentLink };
+    }
+  }
+
+  async function handleSendPaymentLink(attendee: AttendeeView) {
+    if (!eventRow || attendee.status !== "waitlist" || sendingPaymentLinkId) return;
+
+    setSendingPaymentLinkId(attendee.id);
+    setErrorMessage(null);
+    setFeedbackMessage(null);
+
+    try {
+      const result = await requestWaitlistPaymentLink({
+        registrationId: attendee.id,
+        requireAvailableSpot: true,
+        successMessage: labels.paymentLinkSent,
+      });
+      setFeedbackMessage(result);
+      await refreshAttendees();
+    } finally {
+      setSendingPaymentLinkId(null);
+    }
+  }
+
+  async function handleResendPaymentLink(attendee: AttendeeView) {
+    if (!eventRow || attendee.status !== "pending" || sendingPaymentLinkId) return;
+
+    setSendingPaymentLinkId(attendee.id);
+    setErrorMessage(null);
+    setFeedbackMessage(null);
+
+    try {
+      const result = await requestWaitlistPaymentLink({
+        registrationId: attendee.id,
+        resend: true,
+        successMessage: labels.paymentLinkResent,
+      });
+      setFeedbackMessage(result);
+    } finally {
+      setSendingPaymentLinkId(null);
+    }
+  }
+
+  async function promoteFirstWaitlistAfterSpotFreed() {
+    if (!eventRow) return;
+
+    const { data: waitlistRows, error: waitlistError } = await supabase
+      .from("registrations")
+      .select("id,client_id")
+      .eq("event_id", String(eventRow.id))
+      .eq("status", "waitlist")
+      .order("created_at", { ascending: true })
+      .limit(1);
+
+    const hasWaitlist = !waitlistError && (waitlistRows?.length ?? 0) > 0;
+    if (!hasWaitlist) {
+      setFeedbackMessage({ level: "success", message: labels.cancelRegistrationDone });
+      return;
     }
 
-    const attendeeRows = registrationRows.map((registration) => {
-      const client = clientsById[String(registration.client_id ?? "")];
-      const status: AttendeeView["status"] =
-        registration.status === "cancelled" ? "cancelled" : "confirmed";
-      return {
-        id: String(registration.id),
-        fullName: client?.full_name ?? "Unknown attendee",
-        email: client?.email ?? "No email",
-        phone: client?.phone ?? "-",
-        status,
-        createdAt: registration.created_at ?? null,
-      } as AttendeeView;
-    });
+    if (isPaidEvent) {
+      const firstWaitlist = waitlistRows![0] as { id: string | number };
+      const paymentResult = await requestWaitlistPaymentLink({
+        registrationId: String(firstWaitlist.id),
+        requireAvailableSpot: true,
+        successMessage: labels.cancelRegistrationWaitlistPaymentSent,
+      });
+      setFeedbackMessage(paymentResult);
+      return;
+    }
 
-    setAttendees(attendeeRows);
+    const firstWaitlist = waitlistRows![0] as { id: string | number; client_id: string | number | null };
+    const { error: promoteError } = await supabase
+      .from("registrations")
+      .update({
+        status: "confirmed",
+        payment_status: resolveRegistrationPaymentStatus("confirmed", false),
+      })
+      .eq("id", firstWaitlist.id);
+
+    if (promoteError) {
+      console.error("[waitlist] Failed to promote waitlist registration:", promoteError.message);
+      setErrorMessage(labels.couldNotCancelRegistration);
+      return;
+    }
+
+    let emailSent = true;
+    if (firstWaitlist.client_id) {
+      const { data: clientRow } = await supabase
+        .from("clients")
+        .select("full_name,email")
+        .eq("id", firstWaitlist.client_id)
+        .maybeSingle();
+
+      if (clientRow?.email) {
+        try {
+          const emailResponse = await fetch("/api/send-waitlist-promotion", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fullName: clientRow.full_name ?? "Asistente",
+              email: clientRow.email,
+              eventTitle: eventRow.title ?? eventRow.slug ?? "Evento",
+              eventDate: eventRow.event_date ?? "Por confirmar",
+              eventTime: eventRow.event_time,
+              eventLocation: eventRow.location,
+            }),
+          });
+
+          if (!emailResponse.ok) {
+            emailSent = false;
+            console.warn(
+              "[email] Waitlist promotion confirmation email failed:",
+              emailResponse.status,
+            );
+          }
+        } catch (emailError) {
+          emailSent = false;
+          console.error("[email] Waitlist promotion confirmation email failed:", emailError);
+        }
+      }
+    }
+
+    setFeedbackMessage({
+      level: emailSent ? "success" : "warning",
+      message: emailSent
+        ? labels.cancelRegistrationWaitlistPromoted
+        : labels.cancelRegistrationWaitlistPromotedEmailFailed,
+    });
   }
 
   async function handleCancelRegistration(attendee: AttendeeView) {
@@ -254,11 +432,12 @@ export default function AdminAttendeesPage() {
     if (attendee.status === "cancelled") return;
     if (cancellingId) return;
 
-    const confirmed = window.confirm(`Cancel ${attendee.fullName}'s registration?`);
+    const confirmed = window.confirm(getCancelRegistrationConfirmMessage(attendee.fullName));
     if (!confirmed) return;
 
     setCancellingId(attendee.id);
     setErrorMessage(null);
+    setFeedbackMessage(null);
 
     try {
       const candidateId = Number.isFinite(Number(attendee.id)) ? Number(attendee.id) : attendee.id;
@@ -268,23 +447,14 @@ export default function AdminAttendeesPage() {
         .eq("id", candidateId);
 
       if (cancelError) {
-        setErrorMessage("Could not cancel this registration.");
+        setErrorMessage(labels.couldNotCancelRegistration);
         return;
       }
 
-      const { data: waitlistRows, error: waitlistError } = await supabase
-        .from("registrations")
-        .select("id")
-        .eq("event_id", String(eventRow.id))
-        .eq("status", "waitlist")
-        .order("created_at", { ascending: true })
-        .limit(1);
-
-      if (!waitlistError && (waitlistRows?.length ?? 0) > 0) {
-        const firstWaitlistId = (waitlistRows?.[0] as { id: string | number } | undefined)?.id;
-        if (firstWaitlistId) {
-          await supabase.from("registrations").update({ status: "confirmed" }).eq("id", firstWaitlistId);
-        }
+      if (attendee.status === "confirmed" || (isPaidEvent && attendee.status === "pending")) {
+        await promoteFirstWaitlistAfterSpotFreed();
+      } else {
+        setFeedbackMessage({ level: "success", message: labels.cancelRegistrationDone });
       }
 
       await refreshAttendees();
@@ -312,13 +482,14 @@ export default function AdminAttendeesPage() {
     setIsDownloading(true);
 
     try {
-      const header = ["Name", "Email", "Event title", "Registration date"];
+      const header = ["Nombre", "Correo electrónico", "Evento", "Estado", "Fecha de inscripción"];
       const rows = attendees.map((attendee) => {
         const createdAtIso = attendee.createdAt ? new Date(attendee.createdAt).toISOString() : "";
         return [
           escapeCsvValue(attendee.fullName),
           escapeCsvValue(attendee.email),
-          escapeCsvValue(eventRow.title ?? eventRow.slug ?? "Event"),
+          escapeCsvValue(eventRow.title ?? eventRow.slug ?? "Evento"),
+          escapeCsvValue(getRegistrationStatusLabel(attendee.status)),
           escapeCsvValue(createdAtIso),
         ].join(",");
       });
@@ -343,22 +514,35 @@ export default function AdminAttendeesPage() {
   }
 
   return (
-    <AdminShell title="View attendees" subtitle="Monitor registrations and attendee visibility for each event.">
+    <AdminShell title={labels.viewAttendees} subtitle={labels.viewAttendeesSubtitle}>
       <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
         {isLoading ? (
-          <p className="text-sm text-zinc-600">Loading event...</p>
+          <p className="text-sm text-zinc-600">{labels.loading}</p>
         ) : isNotFound ? (
-          <p className="text-sm text-zinc-600">Event not found.</p>
+          <p className="text-sm text-zinc-600">{labels.eventNotFound}</p>
         ) : errorMessage ? (
           <p className="text-sm text-rose-600">{errorMessage}</p>
         ) : (
           <>
             <h2 className="text-xl font-semibold text-zinc-900">{eventRow?.title}</h2>
             <p className="mt-2 text-sm text-zinc-600">
-              {eventRow?.event_date} at {eventRow?.event_time}
+              {eventRow?.event_date && eventRow?.event_time
+                ? formatPublicEventDateTime(eventRow.event_date, eventRow.event_time)
+                : eventRow?.event_date
+                  ? formatPublicEventDateTime(eventRow.event_date, "TBD")
+                  : null}
             </p>
             <p className="mt-1 text-sm text-zinc-600">{eventRow?.location}</p>
-            <p className="mt-1 text-sm text-zinc-600">Capacity: {eventRow?.capacity ?? 0}</p>
+            <p className="mt-1 text-sm text-zinc-600">
+              {labels.capacity}: {eventRow?.capacity ?? 0}
+              {isPaidEvent ? (
+                <>
+                  {" "}
+                  · {labels.confirmed}: {confirmedCount} · Pendientes de pago: {pendingCount} ·{" "}
+                  {labels.remaining}: {remainingSpots}
+                </>
+              ) : null}
+            </p>
           </>
         )}
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -366,7 +550,7 @@ export default function AdminAttendeesPage() {
             href="/"
             className="inline-flex rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            Back to dashboard
+            {labels.backToDashboard}
           </Link>
           <button
             type="button"
@@ -374,7 +558,7 @@ export default function AdminAttendeesPage() {
             disabled={!eventRow || attendees.length === 0 || isLoading || Boolean(errorMessage) || isDownloading}
             className="inline-flex rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
           >
-            {isDownloading ? "Preparing..." : "Download attendees"}
+            {isDownloading ? labels.preparing : labels.downloadAttendees}
           </button>
           <button
             type="button"
@@ -382,26 +566,38 @@ export default function AdminAttendeesPage() {
             disabled={!routeSlug}
             className="inline-flex rounded-lg bg-[var(--accent-button)] px-4 py-2 text-sm font-medium text-[var(--on-accent)] transition hover:bg-[var(--accent-button-hover)] active:bg-[var(--accent-button-pressed)] disabled:cursor-not-allowed disabled:bg-zinc-400"
           >
-            {copied ? "Copied" : "Copy registration link"}
+            {copied ? labels.copied : labels.copyLink}
           </button>
-          <p className="text-xs text-zinc-500">
-            Share this private registration link with invited guests. Only people with this link
-            can access the registration page.
-          </p>
+          <p className="text-xs text-zinc-500">{labels.sharePrivateLink}</p>
         </div>
       </section>
 
       <section className="rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-5 py-4">
-          <h3 className="text-lg font-semibold text-zinc-900">Attendees</h3>
+          <h3 className="text-lg font-semibold text-zinc-900">{labels.attendees}</h3>
+          {isPaidEvent && (waitlistCount > 0 || pendingCount > 0) ? (
+            <p className="mt-1 text-sm text-amber-800">{labels.paidEventWaitlistNote}</p>
+          ) : null}
         </div>
         <div className="px-5 py-6">
+          {feedbackMessage ? (
+            <p
+              className={[
+                "mb-4 rounded-lg border px-3 py-2 text-sm",
+                feedbackMessage.level === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : feedbackMessage.level === "warning"
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-rose-200 bg-rose-50 text-rose-800",
+              ].join(" ")}
+            >
+              {feedbackMessage.message}
+            </p>
+          ) : null}
           {attendees.length === 0 ? (
             <>
-              <p className="text-sm font-medium text-zinc-800">No attendees yet</p>
-              <p className="mt-1 text-sm text-zinc-600">
-                Attendee data will appear here once registrations are connected.
-              </p>
+              <p className="text-sm font-medium text-zinc-800">{labels.noAttendeesYet}</p>
+              <p className="mt-1 text-sm text-zinc-600">{labels.noAttendeesHint}</p>
             </>
           ) : (
             <ul className="divide-y divide-zinc-100">
@@ -410,25 +606,56 @@ export default function AdminAttendeesPage() {
                   <div>
                     <p className="text-sm font-medium text-zinc-900">{attendee.fullName}</p>
                     <p className="text-xs text-zinc-500">
-                      {attendee.email} - {attendee.phone}
+                      {attendee.email} · {attendee.phone}
                     </p>
+                    {isPaidEvent && attendee.status === "pending" ? (
+                      <p className="mt-1 text-xs text-blue-700">{labels.pendingReservesSpot}</p>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     <span
                       className={[
-                        "inline-flex rounded-full px-2.5 py-1 text-xs font-medium capitalize",
+                        "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
                         badgeClass(attendee.status),
                       ].join(" ")}
                     >
-                      {attendee.status}
+                      {getRegistrationStatusLabel(attendee.status)}
                     </span>
+                    {isPaidEvent && attendee.status === "waitlist" && remainingSpots > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSendPaymentLink(attendee)}
+                        disabled={Boolean(sendingPaymentLinkId) || Boolean(cancellingId)}
+                        className="rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {sendingPaymentLinkId === attendee.id
+                          ? labels.sendingPaymentLink
+                          : labels.sendPaymentLink}
+                      </button>
+                    ) : null}
+                    {isPaidEvent && attendee.status === "pending" ? (
+                      <button
+                        type="button"
+                        onClick={() => handleResendPaymentLink(attendee)}
+                        disabled={Boolean(sendingPaymentLinkId) || Boolean(cancellingId)}
+                        className="rounded-md border border-blue-300 bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-800 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {sendingPaymentLinkId === attendee.id
+                          ? labels.resendingPaymentLink
+                          : labels.resendPaymentLink}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => handleCancelRegistration(attendee)}
-                      disabled={attendee.status === "cancelled" || cancellingId === attendee.id}
+                      disabled={
+                        attendee.status === "cancelled" ||
+                        cancellingId === attendee.id ||
+                        Boolean(sendingPaymentLinkId)
+                      }
                       className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {cancellingId === attendee.id ? "Cancelling..." : "Cancel"}
+                      {cancellingId === attendee.id ? labels.cancelling : labels.cancel}
                     </button>
                   </div>
                 </li>

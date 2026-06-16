@@ -1,4 +1,5 @@
 import { getAdminSpotsLabel } from "./labels";
+import { getOccupiedSpots, getRemainingSpots, isPaidEventFromFlags } from "./event-capacity";
 import type { Event, EventAvailability, EventStatus } from "./types";
 
 const FEW_SPOTS_THRESHOLD = 3;
@@ -7,8 +8,12 @@ export function getEventStatus(
   capacity: number,
   confirmedCount: number,
   waitlistEnabled: boolean,
+  options?: { pendingCount?: number; isPaidEvent?: boolean },
 ): EventStatus {
-  const remainingSpots = Math.max(capacity - confirmedCount, 0);
+  const isPaidEvent = options?.isPaidEvent ?? false;
+  const pendingCount = options?.pendingCount ?? 0;
+  const occupied = isPaidEvent ? confirmedCount + pendingCount : confirmedCount;
+  const remainingSpots = Math.max(capacity - occupied, 0);
   const isFull = remainingSpots === 0;
 
   if (isFull && waitlistEnabled) return "Waitlist only";
@@ -18,20 +23,27 @@ export function getEventStatus(
 }
 
 export function getEventAvailability(event: Event): EventAvailability {
-  const remainingSpots = Math.max(event.capacity - event.confirmedCount, 0);
-  const status = getEventStatus(
-    event.capacity,
-    event.confirmedCount,
-    event.waitlistEnabled,
-  );
+  const isPaidEvent = event.type === "Paid";
+  const counts = {
+    confirmed: event.confirmedCount,
+    pending: event.pendingCount,
+    waitlist: event.waitlistCount,
+  };
+  const remainingSpots = getRemainingSpots(event.capacity, counts, isPaidEvent);
+  const status = getEventStatus(event.capacity, event.confirmedCount, event.waitlistEnabled, {
+    pendingCount: event.pendingCount,
+    isPaidEvent,
+  });
+  const occupiedCount = getOccupiedSpots(counts, isPaidEvent);
 
   return {
     capacity: event.capacity,
     confirmedCount: event.confirmedCount,
+    pendingCount: event.pendingCount,
     waitlistCount: event.waitlistCount,
     remainingSpots,
     spotsLabel: getAdminSpotsLabel(remainingSpots, event.capacity),
-    occupancyRate: Math.round((event.confirmedCount / event.capacity) * 100),
+    occupancyRate: event.capacity > 0 ? Math.round((occupiedCount / event.capacity) * 100) : 0,
     status,
   };
 }
@@ -65,3 +77,5 @@ export function sortEventsForAdmin(events: Event[]): Event[] {
     return a.date.localeCompare(b.date);
   });
 }
+
+export { isPaidEventFromFlags };

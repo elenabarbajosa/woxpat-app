@@ -10,7 +10,7 @@ export const labels = {
   copied: "Copiado",
   recentRegistrations: "Registros recientes",
   fullName: "Nombre completo",
-  email: "Email",
+  email: "Correo electrónico",
   phone: "Teléfono",
   register: "Registrarse",
   registerAndPay: "Registrarse y pagar",
@@ -62,7 +62,75 @@ export const labels = {
   published: "Publicado",
   free: "Gratuito",
   paid: "De pago",
+  backToDashboard: "Volver al panel",
+  downloadAttendees: "Descargar asistentes",
+  editingNow: "Editando evento",
+  dangerZone: "Zona de riesgo",
+  attendees: "Asistentes",
+  preparing: "Preparando...",
+  manageCategories: "Gestionar categorías",
+  eventNotFound: "Evento no encontrado.",
+  couldNotLoadEvent: "No se pudo cargar este evento.",
+  sharePrivateLink:
+    "Comparte este enlace privado con los invitados. Solo quienes tengan el enlace podrán registrarse.",
+  deleteEventWarning: "Eliminar este evento también eliminará sus inscripciones.",
+  deleteEventConfirm:
+    "¿Seguro que quieres eliminar este evento? Esta acción no se puede deshacer.",
+  couldNotDeleteEvent: "No se pudo eliminar este evento.",
+  couldNotUpdateEvent: "No se pudo actualizar el evento.",
+  couldNotLoadCategories: "No se pudieron cargar las categorías.",
+  couldNotLoadAttendees: "No se pudieron cargar los asistentes.",
+  couldNotLoadAttendeeDetails: "No se pudieron cargar los datos de los asistentes.",
+  couldNotRefreshAttendees: "No se pudieron actualizar los asistentes.",
+  couldNotCancelRegistration: "No se pudo cancelar la inscripción.",
+  noAttendeesYet: "Aún no hay asistentes",
+  noAttendeesHint: "Los asistentes aparecerán aquí cuando haya inscripciones.",
+  cancelling: "Cancelando...",
+  viewAttendeesSubtitle:
+    "Consulta las inscripciones y el estado de los asistentes de cada evento.",
+  cancelRegistrationDone: "Inscripción cancelada.",
+  cancelRegistrationWaitlistPromoted:
+    "Inscripción cancelada. Se ha confirmado la plaza para la primera persona en lista de espera.",
+  cancelRegistrationWaitlistPaymentSent:
+    "Inscripción cancelada. Se ha enviado un enlace de pago a la primera persona en lista de espera.",
+  sendPaymentLink: "Enviar enlace de pago",
+  sendingPaymentLink: "Enviando...",
+  paymentLinkSent: "Se ha enviado un enlace de pago a la persona en lista de espera.",
+  paymentLinkEmailFailed:
+    "La plaza se ha liberado, pero no se pudo enviar el email de pago. Revisa la configuración de email.",
+  couldNotSendPaymentLink: "No se pudo enviar el enlace de pago. Inténtalo de nuevo.",
+  resendPaymentLink: "Reenviar enlace de pago",
+  resendingPaymentLink: "Reenviando...",
+  paymentLinkResent: "Se ha reenviado el enlace de pago.",
+  noSpotsAvailablePending:
+    "No hay plazas disponibles. Ya hay una persona pendiente de pago para esta plaza.",
+  pendingReservesSpot: "Reserva una plaza temporalmente hasta completar el pago.",
+  cancelRegistrationWaitlistPromotedEmailFailed:
+    "Inscripción cancelada y plaza confirmada, pero no se pudo enviar el email de aviso.",
+  paidEventWaitlistNote:
+    "Al liberarse una plaza, se envía automáticamente un enlace de pago a la primera persona en lista de espera. Las personas pendientes de pago reservan plaza temporalmente.",
 } as const;
+
+export function getCancelRegistrationConfirmMessage(name: string) {
+  return `¿Cancelar la inscripción de ${name}?`;
+}
+
+export function getRegistrationStatusLabel(
+  status: "confirmed" | "waitlist" | "pending" | "cancelled" | "unknown" | string,
+): string {
+  switch (status) {
+    case "confirmed":
+      return "Confirmado";
+    case "waitlist":
+      return "Lista de espera";
+    case "pending":
+      return "Pendiente de pago";
+    case "cancelled":
+      return "Cancelado";
+    default:
+      return "Desconocido";
+  }
+}
 
 export function getPublicEventStatusLabel(status: EventStatus): string {
   switch (status) {

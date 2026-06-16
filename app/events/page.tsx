@@ -8,14 +8,14 @@ export default function EventsPage() {
       <div className="py-12 sm:py-16">
         <Container>
           <SectionHeader
-            eyebrow="Not available"
-            title="This page isn’t available"
-            description="Woxpat events are private. Guests can only register using a direct event link."
+            eyebrow="No disponible"
+            title="Esta página no está disponible"
+            description="Los eventos de Woxpat son privados. Los invitados solo pueden registrarse mediante un enlace directo al evento."
           />
           <div className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
             <p className="text-sm text-zinc-600">
-              If you were invited, use the registration link sent to you (WhatsApp/email) to open
-              the event page directly.
+              Si has recibido una invitación, usa el enlace de registro que te enviaron (WhatsApp o
+              email) para abrir la página del evento directamente.
             </p>
           </div>
         </Container>

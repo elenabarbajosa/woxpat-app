@@ -127,23 +127,31 @@ export function AdminEventForm({
 
     const parsedCapacity = Number(formState.capacity);
     if (!Number.isFinite(parsedCapacity) || parsedCapacity <= 0) {
-      setSubmitError("Capacity must be a valid number greater than 0.");
+      setSubmitError("La capacidad debe ser un número válido mayor que 0.");
       setIsSubmitting(false);
       return;
     }
 
     const parsedPrice = Number(formState.price);
-    const safePrice =
-      formState.isPaid && Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : 0;
+
+    if (formState.isPaid) {
+      if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+        setSubmitError("Introduce un precio válido para el evento de pago.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    const safePrice = formState.isPaid ? parsedPrice : 0;
 
     if (!categoriesLoading && categoryOptions.length > 0 && !formState.category.trim()) {
-      setSubmitError("Please select a category.");
+      setSubmitError("Selecciona una categoría.");
       setIsSubmitting(false);
       return;
     }
 
     if (!categoriesLoading && categoryOptions.length === 0) {
-      setSubmitError("Add at least one active category before creating an event.");
+      setSubmitError("Añade al menos una categoría activa antes de crear un evento.");
       setIsSubmitting(false);
       return;
     }
@@ -162,7 +170,7 @@ export function AdminEventForm({
       }
       router.push(redirectTo);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Something went wrong.");
+      setSubmitError(error instanceof Error ? error.message : "Algo salió mal.");
     } finally {
       setIsSubmitting(false);
     }
@@ -217,9 +225,9 @@ export function AdminEventForm({
             ) : null}
             {!categoriesError && !categoriesLoading && categoryOptions.length === 0 ? (
               <p className="text-sm text-zinc-600">
-                No active categories yet.{" "}
+                Aún no hay categorías activas.{" "}
                 <Link href="/admin/categories" className="font-medium text-zinc-900 underline-offset-4 hover:underline">
-                  Manage categories
+                  {labels.manageCategories}
                 </Link>
               </p>
             ) : null}
@@ -233,7 +241,7 @@ export function AdminEventForm({
               className={inputClassName}
             >
               {categoriesLoading ? (
-                <option value="">Loading categories...</option>
+                <option value="">Cargando categorías...</option>
               ) : (
                 categoryOptions.map((option) => (
                   <option key={option.id} value={option.name}>

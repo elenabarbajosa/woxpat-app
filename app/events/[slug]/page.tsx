@@ -10,8 +10,14 @@ import {
 } from "@/components/events/registration-form";
 import { Container } from "@/components/layout/container";
 import { PublicShell } from "@/components/layout/public-shell";
+import { formatPublicEventDateTime } from "@/lib/date-utils";
 import { getEventStatus } from "@/lib/event-utils";
 import { labels } from "@/lib/labels";
+import {
+  REGISTRATION_USER_ERROR,
+  registrationUserError,
+  resolveRegistrationPaymentStatus,
+} from "@/lib/registration-utils";
 import { supabase } from "@/lib/supabase";
 import type { EventCategory, EventStatus, EventType } from "@/lib/types";
 
@@ -53,12 +59,12 @@ function mapEventRow(row: SupabaseEventRow): EventDetailView {
   const price = Number(row.price ?? 0);
   return {
     id: String(row.id),
-    title: row.title ?? "Untitled event",
+    title: row.title ?? "Evento sin título",
     slug: row.slug ?? "",
     date: row.event_date ?? "TBD",
     time: row.event_time ?? "TBD",
-    location: row.location ?? "Location pending",
-    description: row.short_description ?? row.long_description ?? "Details coming soon.",
+    location: row.location ?? "Ubicación pendiente",
+    description: row.short_description ?? row.long_description ?? "Detalles próximamente.",
     category: row.category ?? "Networking",
     type: isPaid ? "Paid" : "Free",
     isPaid,
@@ -74,6 +80,7 @@ export default function EventDetailPage() {
 
   const [eventData, setEventData] = useState<EventDetailView | null>(null);
   const [confirmedCount, setConfirmedCount] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isNotFound, setIsNotFound] = useState(false);
@@ -104,7 +111,7 @@ export default function EventDetailPage() {
       if (!isMounted) return;
 
       if (eventError) {
-        setErrorMessage("Could not load this event.");
+        setErrorMessage("No se pudo cargar este evento.");
         setIsLoading(false);
         return;
       }
@@ -118,21 +125,31 @@ export default function EventDetailPage() {
       const mappedEvent = mapEventRow(eventRow as SupabaseEventRow);
       setEventData(mappedEvent);
 
-      const { count: confirmed, error: confirmedError } = await supabase
-        .from("registrations")
-        .select("id", { count: "exact", head: true })
-        .eq("event_id", mappedEvent.id)
-        .eq("status", "confirmed");
+      const [{ count: confirmed, error: confirmedError }, pendingResult] = await Promise.all([
+        supabase
+          .from("registrations")
+          .select("id", { count: "exact", head: true })
+          .eq("event_id", mappedEvent.id)
+          .eq("status", "confirmed"),
+        mappedEvent.isPaid
+          ? supabase
+              .from("registrations")
+              .select("id", { count: "exact", head: true })
+              .eq("event_id", mappedEvent.id)
+              .eq("status", "pending")
+          : Promise.resolve({ count: 0, error: null }),
+      ]);
 
       if (!isMounted) return;
 
-      if (confirmedError) {
-        setErrorMessage("Could not load event availability.");
+      if (confirmedError || pendingResult.error) {
+        setErrorMessage("No se pudo cargar la disponibilidad del evento.");
         setIsLoading(false);
         return;
       }
 
       setConfirmedCount(confirmed ?? 0);
+      setPendingCount(pendingResult.count ?? 0);
       setIsLoading(false);
     }
 
@@ -145,17 +162,21 @@ export default function EventDetailPage() {
 
   const availability = useMemo(() => {
     if (!eventData) return null;
-    const remainingSpots = Math.max(eventData.capacity - confirmedCount, 0);
+    const occupiedCount = eventData.isPaid
+      ? confirmedCount + pendingCount
+      : confirmedCount;
+    const remainingSpots = Math.max(eventData.capacity - occupiedCount, 0);
     const status: EventStatus = getEventStatus(
       eventData.capacity,
       confirmedCount,
       eventData.waitlistEnabled,
+      { pendingCount, isPaidEvent: eventData.isPaid },
     );
     return {
       remainingSpots,
       status,
     };
-  }, [eventData, confirmedCount]);
+  }, [eventData, confirmedCount, pendingCount]);
 
   const formattedPrice = useMemo(() => {
     if (!eventData) return "";
@@ -171,11 +192,11 @@ export default function EventDetailPage() {
     payload: RegistrationSubmitPayload,
   ): Promise<{ registrationStatus: "confirmed" | "waitlist" | "pending" }> {
     if (!eventData || !availability) {
-      throw new Error("Event is not ready. Please try again.");
+      throw new Error("El evento no está listo. Inténtalo de nuevo.");
     }
 
     if (availability.remainingSpots <= 0 && !eventData.waitlistEnabled) {
-      throw new Error("This event is sold out and waitlist is not enabled.");
+      throw new Error("Este evento está agotado y la lista de espera no está activada.");
     }
 
     const privacyAcceptedAt = payload.privacyAccepted ? new Date().toISOString() : null;
@@ -187,7 +208,7 @@ export default function EventDetailPage() {
       .limit(1);
 
     if (existingClientError) {
-      throw new Error(existingClientError.message || "Could not verify client profile.");
+      throw registrationUserError("verify client profile", existingClientError);
     }
 
     let clientId = existingClient?.[0]?.id as string | number | undefined;
@@ -206,7 +227,7 @@ export default function EventDetailPage() {
         .eq("id", clientId);
 
       if (updateClientError) {
-        throw new Error(updateClientError.message || "Could not update client profile.");
+        throw registrationUserError("update client profile", updateClientError);
       }
     } else {
       const { data: insertedClient, error: insertClientError } = await supabase
@@ -223,7 +244,7 @@ export default function EventDetailPage() {
         .single();
 
       if (insertClientError || !insertedClient?.id) {
-        throw new Error(insertClientError?.message || "Could not create client profile.");
+        throw registrationUserError("create client profile", insertClientError);
       }
 
       clientId = insertedClient.id as string | number;
@@ -240,13 +261,11 @@ export default function EventDetailPage() {
       .maybeSingle();
 
     if (existingRegistrationError) {
-      throw new Error(
-        existingRegistrationError.message || "Could not verify existing registration.",
-      );
+      throw registrationUserError("verify existing registration", existingRegistrationError);
     }
 
     if (existingRegistration?.id) {
-      throw new Error("You are already registered for this event.");
+      throw new Error("Ya estás registrado en este evento.");
     }
 
     const registrationStatus: "confirmed" | "pending" | "waitlist" =
@@ -256,12 +275,8 @@ export default function EventDetailPage() {
           ? "pending"
           : "confirmed";
 
-    const paymentStatus =
-      registrationStatus === "waitlist"
-        ? "not_required"
-        : eventData.isPaid
-          ? "pending"
-          : "paid";
+    const paymentStatus = resolveRegistrationPaymentStatus(registrationStatus, eventData.isPaid);
+
     const { data: insertedRegistration, error: registrationError } = await supabase
       .from("registrations")
       .insert({
@@ -274,11 +289,13 @@ export default function EventDetailPage() {
       .single();
 
     if (registrationError) {
-      throw new Error(registrationError.message || "Could not complete registration.");
+      throw registrationUserError("insert registration", registrationError);
     }
 
     if (registrationStatus === "confirmed") {
       setConfirmedCount((current) => current + 1);
+    } else if (registrationStatus === "pending") {
+      setPendingCount((current) => current + 1);
     }
 
     if (!eventData.isPaid && registrationStatus === "confirmed") {
@@ -315,7 +332,7 @@ export default function EventDetailPage() {
     }
 
     if (!insertedRegistration?.id) {
-      throw new Error("Could not start payment. Please try again.");
+      throw new Error(REGISTRATION_USER_ERROR);
     }
 
     const checkoutResponse = await fetch("/api/create-checkout-session", {
@@ -334,7 +351,8 @@ export default function EventDetailPage() {
 
     const checkoutBody = (await checkoutResponse.json()) as { url?: string; error?: string };
     if (!checkoutResponse.ok || !checkoutBody.url) {
-      throw new Error(checkoutBody.error || "Could not start Stripe checkout.");
+      console.error("[registration] create checkout session failed:", checkoutBody.error ?? checkoutResponse.status);
+      throw new Error(REGISTRATION_USER_ERROR);
     }
 
     window.location.assign(checkoutBody.url);
@@ -355,15 +373,15 @@ export default function EventDetailPage() {
 
           {isLoading ? (
             <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <p className="text-sm text-zinc-600">Loading event details...</p>
+              <p className="text-sm text-zinc-600">Cargando detalles del evento...</p>
             </section>
           ) : isNotFound ? (
             <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <p className="text-sm text-zinc-600">Event not found.</p>
+              <p className="text-sm text-zinc-600">Evento no encontrado.</p>
             </section>
           ) : errorMessage || !eventData || !availability ? (
             <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <p className="text-sm text-rose-600">{errorMessage ?? "Could not load this event."}</p>
+              <p className="text-sm text-rose-600">{errorMessage ?? "No se pudo cargar este evento."}</p>
             </section>
           ) : (
             <section className="mt-6 grid gap-6 lg:grid-cols-[1.3fr_1fr]">
@@ -392,7 +410,7 @@ export default function EventDetailPage() {
                   <div className="rounded-xl bg-zinc-50 p-3">
                     <dt className="text-zinc-500">{labels.dateAndTime}</dt>
                     <dd className="mt-1 font-medium">
-                      {eventData.date} a las {eventData.time}
+                      {formatPublicEventDateTime(eventData.date, eventData.time)}
                     </dd>
                   </div>
                   <div className="rounded-xl bg-zinc-50 p-3">

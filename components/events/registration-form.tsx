@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { labels } from "@/lib/labels";
+import { REGISTRATION_USER_ERROR } from "@/lib/registration-utils";
 
 export interface RegistrationSubmitPayload {
   fullName: string;
@@ -50,12 +51,12 @@ export function RegistrationForm({
     if (!resolvedPrefix && phoneNumber) {
       const custom = customCountryCode.trim();
       if (!custom) {
-        setErrorMessage("Please add your country code (e.g. +66).");
+        setErrorMessage("Indica el prefijo del país (p. ej. +66).");
         setIsSubmitting(false);
         return;
       }
       if (!custom.startsWith("+")) {
-        setErrorMessage("Country code must start with + (example: +66).");
+        setErrorMessage("El prefijo del país debe empezar por + (ejemplo: +66).");
         setIsSubmitting(false);
         return;
       }
@@ -63,7 +64,7 @@ export function RegistrationForm({
     }
 
     if (phoneNumber && !resolvedPrefix) {
-      setErrorMessage("Please select a country code before entering a phone number.");
+      setErrorMessage("Selecciona un prefijo de país antes de introducir tu número.");
       setIsSubmitting(false);
       return;
     }
@@ -78,7 +79,7 @@ export function RegistrationForm({
     };
 
     if (!payload.privacyAccepted) {
-      setErrorMessage("You must accept the privacy policy to register.");
+      setErrorMessage("Debes aceptar la política de privacidad para registrarte.");
       setIsSubmitting(false);
       return;
     }
@@ -98,7 +99,7 @@ export function RegistrationForm({
         setCustomCountryCode("");
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not complete registration.");
+      setErrorMessage(error instanceof Error ? error.message : REGISTRATION_USER_ERROR);
     } finally {
       setIsSubmitting(false);
     }
@@ -142,7 +143,7 @@ export function RegistrationForm({
             required
             disabled={isDisabled || isSubmitting}
             className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm outline-none ring-[color:var(--accent-ring)] transition focus:ring-2"
-            placeholder="you@example.com"
+            placeholder="tu@email.com"
           />
         </div>
 
@@ -158,7 +159,7 @@ export function RegistrationForm({
               onChange={(event) => setPhonePrefix(event.target.value)}
               disabled={isDisabled || isSubmitting}
               className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none ring-[color:var(--accent-ring)] transition focus:ring-2"
-              aria-label="Country code"
+              aria-label="Prefijo del país"
             >
               <option value="+351">Portugal (+351)</option>
               <option value="+34">Spain (+34)</option>
@@ -170,7 +171,7 @@ export function RegistrationForm({
               <option value="+55">Brazil (+55)</option>
               <option value="+31">Netherlands (+31)</option>
               <option value="+353">Ireland (+353)</option>
-              <option value="">Other</option>
+              <option value="">Otro</option>
             </select>
             <input
               id="phoneNumber"
@@ -189,7 +190,7 @@ export function RegistrationForm({
                 htmlFor="customCountryCode"
                 className="mb-1.5 block text-sm font-medium text-zinc-700"
               >
-                Custom country code
+                Prefijo personalizado
               </label>
               <input
                 id="customCountryCode"
@@ -203,11 +204,11 @@ export function RegistrationForm({
                 className="w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm outline-none ring-[color:var(--accent-ring)] transition focus:ring-2"
                 placeholder="+66"
               />
-              <p className="mt-1 text-xs text-zinc-500">Include the + prefix (example: +66).</p>
+              <p className="mt-1 text-xs text-zinc-500">Incluye el prefijo + (ejemplo: +66).</p>
             </div>
           ) : null}
           <p className="mt-1 text-xs text-zinc-500">
-            Choose your country code, then enter your number (no need to type the + prefix).
+            Elige el prefijo del país e introduce tu número sin añadir el +.
           </p>
         </div>
 
@@ -219,7 +220,7 @@ export function RegistrationForm({
             disabled={isDisabled || isSubmitting}
             className="mt-0.5 h-4 w-4 rounded border-zinc-300"
           />
-          <span>I agree to the processing of my data according to the privacy policy.</span>
+          <span>Acepto el tratamiento de mis datos de acuerdo con la política de privacidad.</span>
         </label>
 
         <label className="flex items-start gap-3 text-sm text-zinc-700">
@@ -229,7 +230,7 @@ export function RegistrationForm({
             disabled={isDisabled || isSubmitting}
             className="mt-0.5 h-4 w-4 rounded border-zinc-300"
           />
-          <span>I agree to receive future event communications from Woxpat.</span>
+          <span>Acepto recibir futuras comunicaciones de eventos de Woxpat.</span>
         </label>
 
         {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}

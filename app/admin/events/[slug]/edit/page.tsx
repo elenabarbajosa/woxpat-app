@@ -10,6 +10,7 @@ import {
   type AdminEventSubmitPayload,
   type EventCategoryOption,
 } from "@/components/dashboard/create-event-form";
+import { formatPublicEventDateTime } from "@/lib/date-utils";
 import { labels } from "@/lib/labels";
 import { supabase } from "@/lib/supabase";
 
@@ -83,7 +84,7 @@ export default function AdminEditEventPage() {
       if (!isMounted) return;
 
       if (error) {
-        setErrorMessage("Could not load this event.");
+        setErrorMessage(labels.couldNotLoadEvent);
         setEventRow(null);
         setIsLoading(false);
         return;
@@ -133,7 +134,7 @@ export default function AdminEditEventPage() {
       if (!isMounted) return;
 
       if (activeError) {
-        setCategoriesError(activeError.message || "Could not load categories.");
+        setCategoriesError(activeError.message || labels.couldNotLoadCategories);
         setCategoryOptions([]);
         setCategoriesLoading(false);
         return;
@@ -208,7 +209,7 @@ export default function AdminEditEventPage() {
       .eq("slug", currentSlug);
 
     if (error) {
-      throw new Error(error.message || "Failed to update event.");
+      throw new Error(error.message || labels.couldNotUpdateEvent);
     }
   }
 
@@ -216,9 +217,7 @@ export default function AdminEditEventPage() {
     if (isDeleting) return;
     setDeleteError(null);
 
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this event? This action cannot be undone.",
-    );
+    const confirmed = window.confirm(labels.deleteEventConfirm);
     if (!confirmed) return;
 
     setIsDeleting(true);
@@ -232,7 +231,7 @@ export default function AdminEditEventPage() {
       : await deleteQuery.eq("slug", slug ?? "");
 
     if (error) {
-      setDeleteError(error.message || "Could not delete this event.");
+      setDeleteError(error.message || labels.couldNotDeleteEvent);
       setIsDeleting(false);
       return;
     }
@@ -256,24 +255,34 @@ export default function AdminEditEventPage() {
       }
     : null;
 
+  const formattedSchedule =
+    eventRow?.event_date && eventRow?.event_time
+      ? formatPublicEventDateTime(eventRow.event_date, eventRow.event_time)
+      : eventRow?.event_date
+        ? formatPublicEventDateTime(eventRow.event_date, "TBD")
+        : null;
+
   return (
     <AdminShell
       title={labels.editEvent}
       subtitle="Actualiza los detalles, precio y ajustes de publicación del evento."
     >
       <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">Editing now</p>
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">
+          {labels.editingNow}
+        </p>
         {isLoading ? (
-          <p className="mt-2 text-sm text-zinc-600">Loading event...</p>
+          <p className="mt-2 text-sm text-zinc-600">{labels.loading}</p>
         ) : isNotFound ? (
-          <p className="mt-2 text-sm text-zinc-600">Event not found.</p>
+          <p className="mt-2 text-sm text-zinc-600">{labels.eventNotFound}</p>
         ) : errorMessage ? (
           <p className="mt-2 text-sm text-rose-600">{errorMessage}</p>
         ) : (
           <>
             <h2 className="mt-2 text-xl font-semibold text-zinc-900">{eventRow?.title}</h2>
             <p className="mt-2 text-sm text-zinc-600">
-              {eventRow?.event_date} at {eventRow?.event_time} - {eventRow?.location}
+              {formattedSchedule}
+              {formattedSchedule && eventRow?.location ? ` · ${eventRow.location}` : eventRow?.location}
             </p>
           </>
         )}
@@ -282,7 +291,7 @@ export default function AdminEditEventPage() {
             href="/"
             className="inline-flex rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            Volver al panel
+            {labels.backToDashboard}
           </Link>
           <button
             type="button"
@@ -292,9 +301,7 @@ export default function AdminEditEventPage() {
           >
             {copied ? labels.copied : labels.copyLink}
           </button>
-          <p className="text-xs text-zinc-500">
-            Comparte este enlace privado con los invitados. Solo quienes lo tengan podrán registrarse.
-          </p>
+          <p className="text-xs text-zinc-500">{labels.sharePrivateLink}</p>
         </div>
       </section>
 
@@ -312,11 +319,9 @@ export default function AdminEditEventPage() {
 
       <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
         <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-zinc-600">
-          Danger zone
+          {labels.dangerZone}
         </h3>
-        <p className="mt-2 text-sm text-zinc-600">
-          Deleting this event will also remove its registrations.
-        </p>
+        <p className="mt-2 text-sm text-zinc-600">{labels.deleteEventWarning}</p>
         {deleteError ? <p className="mt-3 text-sm text-rose-600">{deleteError}</p> : null}
         <button
           type="button"

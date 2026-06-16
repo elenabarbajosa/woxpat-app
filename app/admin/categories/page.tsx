@@ -14,19 +14,6 @@ type EventCategoryRow = {
   created_at: string | null;
 };
 
-function formatCreatedAt(value: string | null) {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return "—";
-  }
-}
-
 export default function AdminCategoriesPage() {
   const [rows, setRows] = useState<EventCategoryRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,7 +32,7 @@ export default function AdminCategoriesPage() {
       .order("name");
 
     if (error) {
-      setListError(error.message || "Could not load categories.");
+      setListError(error.message || "No se pudieron cargar las categorías.");
       setRows([]);
       setIsLoading(false);
       return;
@@ -71,7 +58,7 @@ export default function AdminCategoriesPage() {
     setActionError(null);
     const name = newName.trim();
     if (!name) {
-      setActionError("Enter a category name.");
+      setActionError("Introduce un nombre de categoría.");
       return;
     }
 
@@ -85,7 +72,7 @@ export default function AdminCategoriesPage() {
     });
 
     if (error) {
-      setActionError(error.message || "Could not add category.");
+      setActionError(error.message || "No se pudo añadir la categoría.");
       setIsAdding(false);
       return;
     }
@@ -101,7 +88,7 @@ export default function AdminCategoriesPage() {
     const { error } = await supabase.from("event_categories").update({ is_active: isActive }).eq("id", id);
     setBusyId(null);
     if (error) {
-      setActionError(error.message || "Could not update category.");
+      setActionError(error.message || "No se pudo actualizar la categoría.");
       return;
     }
     await loadCategories();
@@ -110,7 +97,7 @@ export default function AdminCategoriesPage() {
   async function handleDeleteCategory(row: EventCategoryRow) {
     setActionError(null);
     const confirmed = window.confirm(
-      `Delete category "${row.name}"? This only works if no events use this category name.`,
+      `¿Eliminar la categoría "${row.name}"? Solo es posible si ningún evento usa este nombre.`,
     );
     if (!confirmed) return;
 
@@ -121,14 +108,14 @@ export default function AdminCategoriesPage() {
       .eq("category", row.name);
 
     if (countError) {
-      setActionError(countError.message || "Could not verify events.");
+      setActionError(countError.message || "No se pudieron comprobar los eventos.");
       setBusyId(null);
       return;
     }
 
     if ((count ?? 0) > 0) {
       setActionError(
-        `Cannot delete: ${count} event(s) still use the category name "${row.name}". Deactivate it instead.`,
+        `No se puede eliminar: ${count} evento(s) usan la categoría "${row.name}". Desactívala en su lugar.`,
       );
       setBusyId(null);
       return;
@@ -137,7 +124,7 @@ export default function AdminCategoriesPage() {
     const { error } = await supabase.from("event_categories").delete().eq("id", row.id);
     setBusyId(null);
     if (error) {
-      setActionError(error.message || "Could not delete category.");
+      setActionError(error.message || "No se pudo eliminar la categoría.");
       return;
     }
     await loadCategories();
@@ -145,26 +132,24 @@ export default function AdminCategoriesPage() {
 
   return (
     <AdminShell
-      title="Event categories"
-      subtitle="Manage categories for new and existing events. Events store the category as plain text (the display name)."
+      title="Categorías de eventos"
+      subtitle="Gestiona las categorías para eventos nuevos y existentes."
       actions={
         <Link
           href="/admin/events/new"
           className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
         >
-          Create event
+          Crear evento
         </Link>
       }
     >
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-6">
-        <h2 className="text-lg font-semibold text-zinc-900">Add category</h2>
-        <p className="mt-1 text-sm text-zinc-600">
-          Slug is generated from the name. Names must be unique.
-        </p>
+        <h2 className="text-lg font-semibold text-zinc-900">Añadir categoría</h2>
+        <p className="mt-1 text-sm text-zinc-600">Los nombres deben ser únicos.</p>
         <form className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleAddCategory}>
           <div className="min-w-0 flex-1">
             <label htmlFor="newCategoryName" className="mb-1.5 block text-sm font-medium text-zinc-700">
-              Name
+              Nombre
             </label>
             <input
               id="newCategoryName"
@@ -173,7 +158,7 @@ export default function AdminCategoriesPage() {
               onChange={(e) => setNewName(e.target.value)}
               disabled={isAdding}
               className="box-border w-full min-w-0 max-w-full rounded-lg border border-zinc-300 px-3 py-2.5 text-sm outline-none ring-[color:var(--accent-ring)] focus:ring-2"
-              placeholder="e.g. Panel discussion"
+              placeholder="p. ej. Mesa redonda"
             />
           </div>
           <button
@@ -181,7 +166,7 @@ export default function AdminCategoriesPage() {
             disabled={isAdding}
             className="inline-flex shrink-0 items-center justify-center rounded-lg bg-[var(--accent-button)] px-4 py-2.5 text-sm font-medium text-[var(--on-accent)] transition hover:bg-[var(--accent-button-hover)] active:bg-[var(--accent-button-pressed)] disabled:opacity-60"
           >
-            {isAdding ? "Adding…" : "Add category"}
+            {isAdding ? "Añadiendo…" : "Añadir categoría"}
           </button>
         </form>
         {actionError ? <p className="mt-3 text-sm text-rose-600">{actionError}</p> : null}
@@ -189,18 +174,20 @@ export default function AdminCategoriesPage() {
 
       <section className="mt-8 rounded-2xl border border-zinc-200 bg-white shadow-sm">
         <div className="border-b border-zinc-200 px-4 py-4 sm:px-5">
-          <h2 className="text-lg font-semibold text-zinc-900">All categories</h2>
+          <h2 className="text-lg font-semibold text-zinc-900">Todas las categorías</h2>
           <p className="mt-1 text-sm text-zinc-600">
-            Deactivated categories are hidden from the event form. Existing events keep their stored name.
+            Las categorías desactivadas no aparecen al crear eventos. Los eventos existentes conservan su categoría.
           </p>
         </div>
 
         {isLoading ? (
-          <p className="px-4 py-6 text-sm text-zinc-500 sm:px-5">Loading categories…</p>
+          <p className="px-4 py-6 text-sm text-zinc-500 sm:px-5">Cargando categorías…</p>
         ) : listError ? (
           <p className="px-4 py-6 text-sm text-rose-600 sm:px-5">{listError}</p>
         ) : rows.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-zinc-500 sm:px-5">No categories yet. Add one above.</p>
+          <p className="px-4 py-6 text-sm text-zinc-500 sm:px-5">
+            Aún no hay categorías. Añade una arriba.
+          </p>
         ) : (
           <div className="divide-y divide-zinc-100">
             {rows.map((row) => (
@@ -208,12 +195,8 @@ export default function AdminCategoriesPage() {
                 key={row.id}
                 className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5"
               >
-                <div className="min-w-0 flex-1 space-y-1">
+                <div className="min-w-0 flex-1">
                   <p className="break-words font-medium text-zinc-900">{row.name}</p>
-                  <p className="break-all text-xs text-zinc-500">
-                    <span className="font-medium text-zinc-600">Slug:</span> {row.slug}
-                  </p>
-                  <p className="text-xs text-zinc-500">Added {formatCreatedAt(row.created_at)}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                   <span
@@ -223,7 +206,7 @@ export default function AdminCategoriesPage() {
                         : "bg-zinc-100 text-zinc-600 ring-1 ring-zinc-200/80"
                     }`}
                   >
-                    {row.is_active ? "Active" : "Inactive"}
+                    {row.is_active ? "Activa" : "Inactiva"}
                   </span>
                   {row.is_active ? (
                     <button
@@ -232,7 +215,7 @@ export default function AdminCategoriesPage() {
                       onClick={() => setCategoryActive(row.id, false)}
                       className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                     >
-                      {busyId === row.id ? "…" : "Deactivate"}
+                      {busyId === row.id ? "…" : "Desactivar"}
                     </button>
                   ) : (
                     <button
@@ -241,7 +224,7 @@ export default function AdminCategoriesPage() {
                       onClick={() => setCategoryActive(row.id, true)}
                       className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:opacity-50"
                     >
-                      {busyId === row.id ? "…" : "Activate"}
+                      {busyId === row.id ? "…" : "Activar"}
                     </button>
                   )}
                   <button
@@ -250,7 +233,7 @@ export default function AdminCategoriesPage() {
                     onClick={() => handleDeleteCategory(row)}
                     className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-800 transition hover:bg-rose-100 disabled:opacity-50"
                   >
-                    Delete
+                    Eliminar
                   </button>
                 </div>
               </div>

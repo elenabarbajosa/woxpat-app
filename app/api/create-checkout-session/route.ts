@@ -1,4 +1,4 @@
-import { stripe } from "@/lib/stripe";
+import { createCheckoutSessionForRegistration } from "@/lib/stripe/create-checkout-session-for-registration";
 
 type CreateCheckoutSessionBody = {
   registrationId: string;
@@ -26,51 +26,22 @@ export async function POST(request: Request) {
       return Response.json({ error: "Invalid price." }, { status: 400 });
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
-    if (!appUrl) {
-      return Response.json({ error: "Missing NEXT_PUBLIC_APP_URL." }, { status: 500 });
-    }
-
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return Response.json({ error: "Missing STRIPE_SECRET_KEY." }, { status: 500 });
-    }
-
-    const unitAmount = Math.round(price * 100);
-    const successUrl = `${appUrl}/events/${eventSlug}/success?session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${appUrl}/events/${eventSlug}`;
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      currency: "eur",
-      customer_email: clientEmail,
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: "eur",
-            unit_amount: unitAmount,
-            product_data: {
-              name: eventTitle,
-            },
-          },
-        },
-      ],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      metadata: {
-        registration_id: registrationId,
-        event_slug: eventSlug,
-      },
+    const result = await createCheckoutSessionForRegistration({
+      registrationId,
+      eventSlug,
+      eventTitle,
+      price,
+      clientEmail,
     });
 
-    if (!session.url) {
-      return Response.json({ error: "Stripe session did not return a redirect URL." }, { status: 500 });
+    if (!result.success) {
+      const status = result.error.includes("Missing") ? 500 : 500;
+      return Response.json({ error: result.error }, { status });
     }
 
-    return Response.json({ url: session.url });
+    return Response.json({ url: result.url });
   } catch (error) {
     console.error("Create checkout session failed:", error);
     return Response.json({ error: "Failed to create checkout session." }, { status: 500 });
   }
 }
-

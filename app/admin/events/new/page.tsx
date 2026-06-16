@@ -38,7 +38,7 @@ export default function AdminCreateEventPage() {
       if (!isMounted) return;
 
       if (error) {
-        setCategoriesError(error.message || "Could not load categories.");
+        setCategoriesError(error.message || labels.couldNotLoadCategories);
         setCategoryOptions([]);
       } else {
         setCategoryOptions((data ?? []) as EventCategoryOption[]);
@@ -64,7 +64,7 @@ export default function AdminCreateEventPage() {
       .limit(1);
 
     if (slugCheckError) {
-      throw new Error(slugCheckError.message || "Failed to validate event slug.");
+      throw new Error(slugCheckError.message || "No se pudo validar el slug del evento.");
     }
 
     if ((existingSlugRows?.length ?? 0) > 0) {
@@ -88,7 +88,7 @@ export default function AdminCreateEventPage() {
     });
 
     if (error) {
-      throw new Error(error.message || "Failed to create event.");
+      throw new Error(error.message || "No se pudo crear el evento.");
     }
   }
 

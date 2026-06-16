@@ -10,11 +10,12 @@ export default function AdminSettingsPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setErrorMessage(null);
     setSuccessMessage(null);
     setIsSubmitting(true);
 
-    const formData = new FormData(event.currentTarget);
+    const formData = new FormData(formElement);
     const currentPassword = String(formData.get("currentPassword") ?? "");
     const newPassword = String(formData.get("newPassword") ?? "");
     const confirmPassword = String(formData.get("confirmPassword") ?? "");
@@ -41,13 +42,16 @@ export default function AdminSettingsPage() {
       const data = (await response.json()) as { error?: string };
 
       if (!response.ok) {
+        setSuccessMessage(null);
         setErrorMessage(data.error ?? "No se pudo actualizar la contraseña.");
         return;
       }
 
+      setErrorMessage(null);
       setSuccessMessage("Contraseña actualizada correctamente");
-      event.currentTarget.reset();
+      formElement.reset();
     } catch {
+      setSuccessMessage(null);
       setErrorMessage("No se pudo actualizar la contraseña.");
     } finally {
       setIsSubmitting(false);

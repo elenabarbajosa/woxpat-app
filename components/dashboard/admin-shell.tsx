@@ -38,9 +38,9 @@ export function AdminShell({ title, subtitle, actions, children }: AdminShellPro
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 md:grid-cols-[220px_1fr]">
-        <aside className="border-b border-zinc-200 bg-white p-6 md:border-b-0 md:border-r">
+    <div className="min-h-screen w-full bg-zinc-50">
+      <div className="flex min-h-screen w-full flex-col md:flex-row">
+        <aside className="w-full shrink-0 border-b border-zinc-200 bg-white p-6 md:w-[220px] md:border-b-0 md:border-r">
           <Link href="/" className="text-lg font-semibold tracking-tight text-zinc-900">
             Woxpat
           </Link>
@@ -70,15 +70,17 @@ export function AdminShell({ title, subtitle, actions, children }: AdminShellPro
           </nav>
         </aside>
 
-        <main className="p-6 lg:p-10">
-          <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">{title}</h1>
-              <p className="mt-2 text-zinc-600">{subtitle}</p>
-            </div>
-            {actions}
-          </header>
-          {children}
+        <main className="min-w-0 flex-1">
+          <div className="mx-auto w-full max-w-7xl p-6 lg:p-10">
+            <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">{title}</h1>
+                <p className="mt-2 text-zinc-600">{subtitle}</p>
+              </div>
+              {actions}
+            </header>
+            {children}
+          </div>
         </main>
       </div>
     </div>

@@ -7,7 +7,7 @@ import { AdminShell } from "@/components/dashboard/admin-shell";
 import { StatsCard } from "@/components/dashboard/stats-card";
 import { EventStatusBadge } from "@/components/events/event-status-badge";
 import { getEventAvailability, sortEventsForAdmin } from "@/lib/event-utils";
-import { labels } from "@/lib/labels";
+import { getRegistrationStatusLabel, labels } from "@/lib/labels";
 import { supabase } from "@/lib/supabase";
 import type { Event } from "@/lib/types";
 
@@ -67,9 +67,9 @@ function generateSlug(value: string) {
 function mapSupabaseEventToEvent(
   row: SupabaseEventRow,
   index: number,
-  countsByEventId: Record<string, { confirmed: number; waitlist: number }>,
+  countsByEventId: Record<string, { confirmed: number; pending: number; waitlist: number }>,
 ): Event {
-  const safeTitle = row.title?.trim() || "Untitled event";
+  const safeTitle = row.title?.trim() || "Evento sin título";
   const safeSlug =
     row.slug?.trim() ||
     safeTitle
@@ -79,7 +79,7 @@ function mapSupabaseEventToEvent(
     `event-${index + 1}`;
 
   const eventId = String(row.id ?? safeSlug);
-  const counts = countsByEventId[eventId] ?? { confirmed: 0, waitlist: 0 };
+  const counts = countsByEventId[eventId] ?? { confirmed: 0, pending: 0, waitlist: 0 };
   const capacity = row.capacity ?? 0;
   const isPaid = row.is_paid ?? (row.price ?? 0) > 0;
 
@@ -89,12 +89,13 @@ function mapSupabaseEventToEvent(
     title: safeTitle,
     date: row.event_date ?? "TBD",
     time: row.event_time ?? "TBD",
-    location: row.location ?? "Location pending",
-    description: row.short_description ?? row.long_description ?? "Details coming soon.",
+    location: row.location ?? "Ubicación pendiente",
+    description: row.short_description ?? row.long_description ?? "Detalles próximamente.",
     category: row.category ?? "Networking",
     type: isPaid ? "Paid" : "Free",
     capacity,
     confirmedCount: counts.confirmed,
+    pendingCount: counts.pending,
     waitlistEnabled: row.waitlist_enabled ?? true,
     waitlistCount: counts.waitlist,
     featured: row.is_published ?? false,
@@ -129,7 +130,7 @@ export default function AdminPage() {
       if (!isMounted) return;
 
       if (error) {
-        setErrorMessage("Could not load events from Supabase.");
+        setErrorMessage("No se pudieron cargar los eventos.");
         setEvents([]);
         setIsLoading(false);
         return;
@@ -137,7 +138,7 @@ export default function AdminPage() {
 
       const eventsData = (data ?? []) as SupabaseEventRow[];
       const eventIds = eventsData.map((event) => String(event.id));
-      const countsByEventId: Record<string, { confirmed: number; waitlist: number }> = {};
+      const countsByEventId: Record<string, { confirmed: number; pending: number; waitlist: number }> = {};
 
       if (eventIds.length > 0) {
         const { data: registrationsData, error: registrationsError } = await supabase
@@ -146,7 +147,7 @@ export default function AdminPage() {
           .in("event_id", eventIds);
 
         if (registrationsError) {
-          setErrorMessage("Could not load registration counts.");
+          setErrorMessage("No se pudieron cargar los recuentos de inscripciones.");
           setEvents([]);
           setIsLoading(false);
           return;
@@ -156,10 +157,12 @@ export default function AdminPage() {
           const eventId = String(registration.event_id ?? "");
           if (!eventId) return;
           if (!countsByEventId[eventId]) {
-            countsByEventId[eventId] = { confirmed: 0, waitlist: 0 };
+            countsByEventId[eventId] = { confirmed: 0, pending: 0, waitlist: 0 };
           }
           if (registration.status === "confirmed") {
             countsByEventId[eventId].confirmed += 1;
+          } else if (registration.status === "pending") {
+            countsByEventId[eventId].pending += 1;
           } else if (registration.status === "waitlist") {
             countsByEventId[eventId].waitlist += 1;
           }
@@ -187,7 +190,7 @@ export default function AdminPage() {
       if (!isMounted) return;
 
       if (registrationsError) {
-        setRecentError(registrationsError.message || "Could not load recent registrations.");
+        setRecentError(registrationsError.message || "No se pudieron cargar los registros recientes.");
         setRecentRegistrations([]);
         setIsRecentLoading(false);
         return;
@@ -221,7 +224,7 @@ export default function AdminPage() {
         if (!isMounted) return;
 
         if (clientsError) {
-          setRecentError(clientsError.message || "Could not load recent registrations.");
+          setRecentError(clientsError.message || "No se pudieron cargar los registros recientes.");
           setRecentRegistrations([]);
           setIsRecentLoading(false);
           return;
@@ -247,7 +250,7 @@ export default function AdminPage() {
         if (!isMounted) return;
 
         if (eventsError) {
-          setRecentError(eventsError.message || "Could not load recent registrations.");
+          setRecentError(eventsError.message || "No se pudieron cargar los registros recientes.");
           setRecentRegistrations([]);
           setIsRecentLoading(false);
           return;
@@ -269,7 +272,7 @@ export default function AdminPage() {
 
         const createdAt = registration.created_at ? new Date(registration.created_at) : null;
         const createdAtLabel = createdAt
-          ? createdAt.toLocaleString(undefined, {
+          ? createdAt.toLocaleString("es-ES", {
               year: "numeric",
               month: "short",
               day: "2-digit",
@@ -280,9 +283,9 @@ export default function AdminPage() {
 
         return {
           id: String(registration.id),
-          clientName: client?.full_name ?? "Unknown attendee",
-          clientEmail: client?.email ?? "No email",
-          eventLabel: event?.title?.trim() || event?.slug?.trim() || "Unknown event",
+          clientName: client?.full_name ?? "Asistente desconocido",
+          clientEmail: client?.email ?? "Sin email",
+          eventLabel: event?.title?.trim() || event?.slug?.trim() || "Evento desconocido",
           status:
             registration.status === "waitlist"
               ? "waitlist"
@@ -334,14 +337,14 @@ export default function AdminPage() {
       .maybeSingle();
 
     if (fetchError || !sourceEvent) {
-      setDuplicateError(fetchError?.message || "Could not load event to duplicate.");
+      setDuplicateError(fetchError?.message || "No se pudo cargar el evento para duplicar.");
       setDuplicatingEventId(null);
       return;
     }
 
     const source = sourceEvent as SupabaseEventRow;
-    const sourceTitle = source.title?.trim() || "Untitled event";
-    const nextTitle = `${sourceTitle} (Copy)`;
+    const sourceTitle = source.title?.trim() || "Evento sin título";
+    const nextTitle = `${sourceTitle} (copia)`;
 
     const baseSlug = generateSlug(nextTitle) || "event-copy";
     let slug = baseSlug;
@@ -353,7 +356,7 @@ export default function AdminPage() {
       .limit(25);
 
     if (slugCheckError) {
-      setDuplicateError(slugCheckError.message || "Could not validate event slug.");
+      setDuplicateError(slugCheckError.message || "No se pudo validar el slug del evento.");
       setDuplicatingEventId(null);
       return;
     }
@@ -388,7 +391,7 @@ export default function AdminPage() {
       .single();
 
     if (insertError || !inserted?.slug) {
-      setDuplicateError(insertError?.message || "Could not duplicate this event.");
+      setDuplicateError(insertError?.message || "No se pudo duplicar este evento.");
       setDuplicatingEventId(null);
       return;
     }
@@ -586,7 +589,7 @@ export default function AdminPage() {
                     </div>
                     <div className="flex min-w-0 shrink-0 flex-col items-start gap-1.5 md:items-end md:text-right">
                       <span
-                        className={`inline-flex max-w-full whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ring-1 ${
+                        className={`inline-flex max-w-full whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
                           registration.status === "waitlist"
                             ? "bg-amber-50 text-amber-900 ring-amber-200/80"
                             : registration.status === "pending"
@@ -596,7 +599,7 @@ export default function AdminPage() {
                                 : "bg-emerald-50 text-emerald-900 ring-emerald-200/80"
                         }`}
                       >
-                        {registration.status}
+                        {getRegistrationStatusLabel(registration.status)}
                       </span>
                       <p className="max-w-full break-words text-xs text-zinc-500">
                         {registration.createdAtLabel}

@@ -3,13 +3,18 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { isAllowedAdminEmail } from "@/lib/admin-auth";
 
+const PUBLIC_ADMIN_PATHS = new Set(["/admin/login", "/admin/reset-password"]);
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAdminPath = pathname.startsWith("/admin");
   const isRootPath = pathname === "/";
-  const isLoginPath = pathname === "/admin/login";
 
-  if ((!isAdminPath && !isRootPath) || isLoginPath) {
+  if (!isAdminPath && !isRootPath) {
+    return NextResponse.next();
+  }
+
+  if (PUBLIC_ADMIN_PATHS.has(pathname)) {
     return NextResponse.next();
   }
 
@@ -36,7 +41,12 @@ export async function middleware(request: NextRequest) {
 
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
+
+  if (userError) {
+    console.error("[auth] Middleware session validation failed:", userError.message);
+  }
 
   if (user && isAllowedAdminEmail(user.email)) {
     if (pathname === "/admin") {
@@ -50,6 +60,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const loginUrl = new URL("/admin/login", request.url);
+  loginUrl.searchParams.set("error", "unauthorized");
   return NextResponse.redirect(loginUrl);
 }
 

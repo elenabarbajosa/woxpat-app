@@ -17,6 +17,7 @@ export interface Event {
   type: EventType;
   capacity: number;
   confirmedCount: number;
+  pendingCount: number;
   waitlistEnabled: boolean;
   waitlistCount: number;
   featured?: boolean;
@@ -34,6 +35,7 @@ export interface Registration {
 export interface EventAvailability {
   capacity: number;
   confirmedCount: number;
+  pendingCount: number;
   waitlistCount: number;
   remainingSpots: number;
   spotsLabel: string;

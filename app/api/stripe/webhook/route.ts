@@ -2,6 +2,7 @@ import {
   sendEventConfirmationEmail,
   splitFullName,
 } from "@/lib/email/send-event-confirmation";
+import { fetchConfirmedCount } from "@/lib/event-capacity";
 import { supabase } from "@/lib/supabase";
 import { stripe } from "@/lib/stripe";
 
@@ -27,6 +28,7 @@ type SupabaseEventRow = {
   event_time: string | null;
   location: string | null;
   price: number | null;
+  capacity: number | null;
 };
 
 export async function POST(request: Request) {
@@ -106,8 +108,49 @@ export async function POST(request: Request) {
     return Response.json({ error: "Registration missing client_id or event_id." }, { status: 500 });
   }
 
-  if (registration.status === "waitlist") {
+  if (registration.status === "cancelled") {
+    console.warn("[stripe] Ignoring payment for cancelled registration:", {
+      registrationId: matchedRegistrationId,
+    });
     return Response.json({ received: true });
+  }
+
+  if (registration.status === "waitlist") {
+    console.warn("[stripe] Ignoring payment for waitlist registration:", {
+      registrationId: matchedRegistrationId,
+    });
+    return Response.json({ received: true });
+  }
+
+  const { data: eventRow, error: eventError } = await supabase
+    .from("events")
+    .select("id,title,slug,event_date,event_time,location,price,capacity")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (eventError || !eventRow) {
+    console.error("Failed to fetch event for payment confirmation:", eventError);
+    return Response.json({ error: "Failed to fetch event." }, { status: 500 });
+  }
+
+  const eventData = eventRow as SupabaseEventRow;
+  const capacity = eventData.capacity ?? 0;
+
+  if (registration.status === "pending") {
+    const confirmedCount = await fetchConfirmedCount(supabase, eventId, matchedRegistrationId);
+    if (confirmedCount === null) {
+      return Response.json({ error: "Failed to verify event capacity." }, { status: 500 });
+    }
+
+    if (confirmedCount >= capacity) {
+      console.error("[stripe] Capacity conflict: payment received but event is full:", {
+        registrationId: matchedRegistrationId,
+        eventId,
+        capacity,
+        confirmedCount,
+      });
+      return Response.json({ received: true });
+    }
   }
 
   if (registration.status !== "confirmed" || registration.payment_status !== "paid") {
@@ -122,23 +165,18 @@ export async function POST(request: Request) {
     }
   }
 
-  const [{ data: clientRow, error: clientError }, { data: eventRow, error: eventError }] =
-    await Promise.all([
-      supabase.from("clients").select("id,full_name,email").eq("id", clientId).maybeSingle(),
-      supabase
-        .from("events")
-        .select("id,title,slug,event_date,event_time,location,price")
-        .eq("id", eventId)
-        .maybeSingle(),
-    ]);
+  const { data: clientRow, error: clientError } = await supabase
+    .from("clients")
+    .select("id,full_name,email")
+    .eq("id", clientId)
+    .maybeSingle();
 
-  if (clientError || eventError || !clientRow || !eventRow) {
-    console.error("Failed to fetch client/event:", { clientError, eventError });
+  if (clientError || !clientRow) {
+    console.error("Failed to fetch client:", clientError);
     return Response.json({ error: "Failed to fetch confirmation details." }, { status: 500 });
   }
 
   const client = clientRow as SupabaseClientRow;
-  const eventData = eventRow as SupabaseEventRow;
   const { firstName, lastName } = splitFullName(client.full_name ?? "");
   const amount =
     session.amount_total != null ? session.amount_total / 100 : Number(eventData.price ?? 0);
