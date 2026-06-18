@@ -70,7 +70,7 @@ function buildEmailHtml(params: SendAdminRegistrationNotificationEmailParams): s
       <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 24px 0;" />
       <p><strong>Nombre:</strong> ${params.firstName.trim() || "—"}</p>
       <p><strong>Apellidos:</strong> ${params.lastName.trim() || "—"}</p>
-      <p><strong>Email:</strong> ${params.email.trim()}</p>
+      <p><strong>Email:</strong> ${params.email?.trim() || "—"}</p>
       ${phoneRow}
       <p><strong>Consentimiento marketing:</strong> ${formatBoolean(params.marketingConsent)}</p>
       <p><strong>Política de privacidad aceptada:</strong> ${formatBoolean(params.privacyAccepted)}</p>
@@ -82,32 +82,40 @@ function buildEmailHtml(params: SendAdminRegistrationNotificationEmailParams): s
 export async function sendAdminRegistrationNotificationEmail(
   params: SendAdminRegistrationNotificationEmailParams,
 ): Promise<SendAdminRegistrationNotificationEmailResult> {
+  const adminNotificationConfigured = Boolean(process.env.ADMIN_NOTIFICATION_EMAIL?.trim());
+  console.info("[email] ADMIN_NOTIFICATION_EMAIL configured:", adminNotificationConfigured ? "yes" : "no");
+
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
     const error = "Missing RESEND_API_KEY.";
-    console.error("[email] Admin registration notification failed:", error);
+    console.error("[email] Admin notification failed:", error);
     return { success: false, error };
   }
 
   const to = process.env.ADMIN_NOTIFICATION_EMAIL?.trim();
   if (!to) {
     const error = "Missing ADMIN_NOTIFICATION_EMAIL.";
-    console.error("[email] Admin registration notification failed:", error);
+    console.warn("[email] Admin notification skipped:", error);
     return { success: false, error };
   }
 
   const from = process.env.EMAIL_FROM?.trim() ?? "Woxpat <hola@woxpat.com>";
-  const attendeeEmail = params.email.trim();
+  const attendeeEmail = params.email?.trim() ?? "";
 
   if (!attendeeEmail) {
     const error = "Missing attendee email.";
-    console.error("[email] Admin registration notification failed:", error);
+    console.error("[email] Admin notification failed:", error);
     return { success: false, error };
   }
 
   const eventTitle = params.eventTitle.trim() || "Evento Woxpat";
   const resend = new Resend(apiKey);
   const subject = `Nueva inscripción: ${eventTitle}`;
+
+  console.info("[email] Attempting to send admin notification:", {
+    eventTitle,
+    isPaid: params.isPaid,
+  });
 
   try {
     const { data, error } = await resend.emails.send({
@@ -118,8 +126,7 @@ export async function sendAdminRegistrationNotificationEmail(
     });
 
     if (error) {
-      console.error("[email] Admin registration notification failed:", {
-        to,
+      console.error("[email] Admin notification failed:", {
         eventTitle,
         attendeeEmail,
         error: error.message,
@@ -127,8 +134,7 @@ export async function sendAdminRegistrationNotificationEmail(
       return { success: false, error: error.message };
     }
 
-    console.info("[email] Admin registration notification sent:", {
-      to,
+    console.info("[email] Admin notification sent successfully:", {
       eventTitle,
       attendeeEmail,
       isPaid: params.isPaid,
@@ -138,8 +144,7 @@ export async function sendAdminRegistrationNotificationEmail(
     return { success: true, id: data?.id ?? "" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown email error.";
-    console.error("[email] Admin registration notification failed:", {
-      to,
+    console.error("[email] Admin notification failed:", {
       eventTitle,
       attendeeEmail,
       error: message,
