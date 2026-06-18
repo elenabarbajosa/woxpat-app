@@ -1,3 +1,4 @@
+import { sendAdminRegistrationNotificationEmail } from "@/lib/email/send-admin-registration-notification";
 import {
   sendEventConfirmationEmail,
   splitFullName,
@@ -12,6 +13,10 @@ type SendConfirmationPayload = {
   eventLocation?: string | null;
   isPaid?: boolean;
   amount?: number | null;
+  phone?: string | null;
+  marketingConsent?: boolean;
+  privacyAccepted?: boolean;
+  registrationId?: string | number | null;
 };
 
 export async function POST(request: Request) {
@@ -42,6 +47,30 @@ export async function POST(request: Request) {
 
     if (!result.success) {
       return Response.json({ error: result.error }, { status: 500 });
+    }
+
+    const adminResult = await sendAdminRegistrationNotificationEmail({
+      eventTitle,
+      eventDate,
+      eventTime: body.eventTime,
+      eventLocation: body.eventLocation,
+      firstName,
+      lastName,
+      email,
+      phone: body.phone,
+      marketingConsent: body.marketingConsent,
+      privacyAccepted: body.privacyAccepted,
+      isPaid: Boolean(body.isPaid),
+      amount: body.amount ?? null,
+      registrationId: body.registrationId,
+    });
+
+    if (!adminResult.success) {
+      console.error("[email] Attendee confirmation sent but admin notification failed:", {
+        eventTitle,
+        attendeeEmail: email,
+        error: adminResult.error,
+      });
     }
 
     return Response.json({ success: true, id: result.id });

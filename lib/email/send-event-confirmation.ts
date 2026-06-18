@@ -16,13 +16,6 @@ export type SendEventConfirmationEmailResult =
   | { success: true; id: string }
   | { success: false; error: string };
 
-function formatAmount(amount: number): string {
-  return new Intl.NumberFormat("es-ES", {
-    style: "currency",
-    currency: "EUR",
-  }).format(amount);
-}
-
 function buildEmailHtml(params: SendEventConfirmationEmailParams): string {
   const greetingName = params.firstName.trim() || "asistente";
   const timeRow = params.eventTime?.trim()
@@ -31,25 +24,15 @@ function buildEmailHtml(params: SendEventConfirmationEmailParams): string {
   const locationRow = params.eventLocation?.trim()
     ? `<p><strong>Ubicación:</strong> ${params.eventLocation.trim()}</p>`
     : "";
-  const paymentRow =
-    params.isPaid && params.amount != null
-      ? `<p><strong>Pago confirmado:</strong> ${formatAmount(params.amount)}</p>`
-      : "";
 
   return `
     <div style="font-family: Arial, sans-serif; color: #18181b; line-height: 1.6; max-width: 560px;">
       <p>Hola ${greetingName},</p>
       <p>¡Tu inscripción al evento <strong>${params.eventName}</strong> ha quedado confirmada!</p>
-      <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 24px 0;" />
       <p><strong>Evento:</strong> ${params.eventName}</p>
       <p><strong>Fecha:</strong> ${params.eventDate}</p>
       ${timeRow}
       ${locationRow}
-      ${paymentRow}
-      <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 24px 0;" />
-      <p>Gracias por confiar en Woxpat. Nos encanta crear espacios donde las personas se conectan, aprenden y crecen juntas.</p>
-      <p>Si tienes cualquier duda, responde a este correo y estaremos encantados de ayudarte.</p>
-      <p>¡Nos vemos pronto!<br /><strong>El equipo de Woxpat</strong></p>
     </div>
   `;
 }

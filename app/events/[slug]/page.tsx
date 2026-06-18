@@ -313,6 +313,10 @@ export default function EventDetailPage() {
             eventTime: eventData.time,
             eventLocation: eventData.location,
             isPaid: false,
+            phone: payload.phone,
+            marketingConsent: payload.marketingConsent,
+            privacyAccepted: payload.privacyAccepted,
+            registrationId: insertedRegistration.id,
           }),
         });
 

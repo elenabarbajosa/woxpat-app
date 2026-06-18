@@ -1,9 +1,9 @@
+import { sendAdminRegistrationNotificationEmail } from "@/lib/email/send-admin-registration-notification";
 import {
   sendEventConfirmationEmail,
   splitFullName,
 } from "@/lib/email/send-event-confirmation";
-import { fetchConfirmedCount } from "@/lib/event-capacity";
-import { supabase } from "@/lib/supabase";
+import { createServiceClient } from "@/lib/supabase/service";
 import { stripe } from "@/lib/stripe";
 
 type SupabaseRegistrationRow = {
@@ -18,6 +18,9 @@ type SupabaseClientRow = {
   id: string | number;
   full_name: string | null;
   email: string | null;
+  phone: string | null;
+  marketing_consent: boolean | null;
+  privacy_accepted: boolean | null;
 };
 
 type SupabaseEventRow = {
@@ -31,9 +34,25 @@ type SupabaseEventRow = {
   capacity: number | null;
 };
 
+function registrationIdCandidates(registrationId: string): Array<string | number> {
+  const candidates: Array<string | number> = [registrationId];
+  const asNumber = Number(registrationId);
+  if (Number.isFinite(asNumber)) {
+    candidates.push(asNumber);
+  }
+  return candidates;
+}
+
 export async function POST(request: Request) {
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
     return Response.json({ error: "Missing STRIPE_WEBHOOK_SECRET." }, { status: 500 });
+  }
+
+  let supabase;
+  try {
+    supabase = createServiceClient();
+  } catch {
+    return Response.json({ error: "Missing Supabase service role configuration." }, { status: 500 });
   }
 
   const signature = request.headers.get("stripe-signature");
@@ -70,14 +89,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Missing registration_id in metadata." }, { status: 400 });
   }
 
-  const registrationIdNumber = Number(registrationId);
-  const candidateIds: Array<string | number> = [registrationId];
-  if (Number.isFinite(registrationIdNumber)) candidateIds.push(registrationIdNumber);
-
   let matchedRegistrationId: string | number | null = null;
   let registrationRow: unknown = null;
 
-  for (const candidateId of candidateIds) {
+  for (const candidateId of registrationIdCandidates(registrationId)) {
     const { data, error } = await supabase
       .from("registrations")
       .select("id,client_id,event_id,status,payment_status")
@@ -134,26 +149,11 @@ export async function POST(request: Request) {
   }
 
   const eventData = eventRow as SupabaseEventRow;
-  const capacity = eventData.capacity ?? 0;
 
-  if (registration.status === "pending") {
-    const confirmedCount = await fetchConfirmedCount(supabase, eventId, matchedRegistrationId);
-    if (confirmedCount === null) {
-      return Response.json({ error: "Failed to verify event capacity." }, { status: 500 });
-    }
+  const wasAlreadyPaidAndConfirmed =
+    registration.status === "confirmed" && registration.payment_status === "paid";
 
-    if (confirmedCount >= capacity) {
-      console.error("[stripe] Capacity conflict: payment received but event is full:", {
-        registrationId: matchedRegistrationId,
-        eventId,
-        capacity,
-        confirmedCount,
-      });
-      return Response.json({ received: true });
-    }
-  }
-
-  if (registration.status !== "confirmed" || registration.payment_status !== "paid") {
+  if (!wasAlreadyPaidAndConfirmed) {
     const { error: updateError } = await supabase
       .from("registrations")
       .update({ payment_status: "paid", status: "confirmed" })
@@ -165,39 +165,64 @@ export async function POST(request: Request) {
     }
   }
 
-  const { data: clientRow, error: clientError } = await supabase
-    .from("clients")
-    .select("id,full_name,email")
-    .eq("id", clientId)
-    .maybeSingle();
+  if (!wasAlreadyPaidAndConfirmed) {
+    const { data: clientRow, error: clientError } = await supabase
+      .from("clients")
+      .select("id,full_name,email,phone,marketing_consent,privacy_accepted")
+      .eq("id", clientId)
+      .maybeSingle();
 
-  if (clientError || !clientRow) {
-    console.error("Failed to fetch client:", clientError);
-    return Response.json({ error: "Failed to fetch confirmation details." }, { status: 500 });
-  }
+    if (clientError || !clientRow) {
+      console.error("Failed to fetch client:", clientError);
+      return Response.json({ error: "Failed to fetch confirmation details." }, { status: 500 });
+    }
 
-  const client = clientRow as SupabaseClientRow;
-  const { firstName, lastName } = splitFullName(client.full_name ?? "");
-  const amount =
-    session.amount_total != null ? session.amount_total / 100 : Number(eventData.price ?? 0);
+    const client = clientRow as SupabaseClientRow;
+    const { firstName, lastName } = splitFullName(client.full_name ?? "");
+    const amount =
+      session.amount_total != null ? session.amount_total / 100 : Number(eventData.price ?? 0);
 
-  const emailResult = await sendEventConfirmationEmail({
-    to: client.email ?? "",
-    firstName,
-    lastName,
-    eventName: eventData.title ?? eventData.slug ?? "Evento Woxpat",
-    eventDate: eventData.event_date ?? "Por confirmar",
-    eventTime: eventData.event_time,
-    eventLocation: eventData.location,
-    isPaid: true,
-    amount,
-  });
-
-  if (!emailResult.success) {
-    console.error("[email] Payment confirmed but confirmation email failed:", {
-      registrationId: matchedRegistrationId,
-      error: emailResult.error,
+    const emailResult = await sendEventConfirmationEmail({
+      to: client.email ?? "",
+      firstName,
+      lastName,
+      eventName: eventData.title ?? eventData.slug ?? "Evento Woxpat",
+      eventDate: eventData.event_date ?? "Por confirmar",
+      eventTime: eventData.event_time,
+      eventLocation: eventData.location,
+      isPaid: true,
+      amount,
     });
+
+    if (!emailResult.success) {
+      console.error("[email] Payment confirmed but confirmation email failed:", {
+        registrationId: matchedRegistrationId,
+        error: emailResult.error,
+      });
+    }
+
+    const adminResult = await sendAdminRegistrationNotificationEmail({
+      eventTitle: eventData.title ?? eventData.slug ?? "Evento Woxpat",
+      eventDate: eventData.event_date,
+      eventTime: eventData.event_time,
+      eventLocation: eventData.location,
+      firstName,
+      lastName,
+      email: client.email ?? "",
+      phone: client.phone,
+      marketingConsent: client.marketing_consent,
+      privacyAccepted: client.privacy_accepted,
+      isPaid: true,
+      amount,
+      registrationId: matchedRegistrationId,
+    });
+
+    if (!adminResult.success) {
+      console.error("[email] Payment confirmed but admin notification failed:", {
+        registrationId: matchedRegistrationId,
+        error: adminResult.error,
+      });
+    }
   }
 
   return Response.json({ received: true });
