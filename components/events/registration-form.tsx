@@ -16,7 +16,7 @@ interface RegistrationFormProps {
   eventTitle: string;
   onSubmit: (
     payload: RegistrationSubmitPayload,
-  ) => Promise<{ registrationStatus: "confirmed" | "waitlist" | "pending" }>;
+  ) => Promise<{ registrationStatus: "confirmed" | "waitlist" | "pending"; resumePayment?: boolean }>;
   isDisabled?: boolean;
   disabledMessage?: string;
   submitLabel?: string;
@@ -87,7 +87,11 @@ export function RegistrationForm({
     try {
       const result = await onSubmit(payload);
       if (result.registrationStatus === "pending") {
-        setSuccessMessage("Continúa al pago para confirmar tu plaza.");
+        setSuccessMessage(
+          result.resumePayment
+            ? "Ya empezaste esta inscripción pero el pago sigue pendiente. Redirigiendo al pago..."
+            : "Continúa al pago para confirmar tu plaza.",
+        );
       } else {
         setSuccessMessage(
           result.registrationStatus === "confirmed"

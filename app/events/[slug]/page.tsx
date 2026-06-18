@@ -188,15 +188,35 @@ export default function EventDetailPage() {
     return formatter.format(eventData.price);
   }, [eventData]);
 
-  async function handleRegister(
-    payload: RegistrationSubmitPayload,
-  ): Promise<{ registrationStatus: "confirmed" | "waitlist" | "pending" }> {
-    if (!eventData || !availability) {
-      throw new Error("El evento no está listo. Inténtalo de nuevo.");
+  async function redirectToCheckout(registrationId: string) {
+    const checkoutResponse = await fetch("/api/create-checkout-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        registrationId,
+        eventSlug: eventData!.slug,
+      }),
+    });
+
+    const checkoutBody = (await checkoutResponse.json()) as { url?: string; error?: string };
+    if (!checkoutResponse.ok || !checkoutBody.url) {
+      console.error(
+        "[registration] create checkout session failed:",
+        checkoutBody.error ?? checkoutResponse.status,
+      );
+      throw new Error(REGISTRATION_USER_ERROR);
     }
 
-    if (availability.remainingSpots <= 0 && !eventData.waitlistEnabled) {
-      throw new Error("Este evento está agotado y la lista de espera no está activada.");
+    window.location.assign(checkoutBody.url);
+  }
+
+  async function handleRegister(
+    payload: RegistrationSubmitPayload,
+  ): Promise<{ registrationStatus: "confirmed" | "waitlist" | "pending"; resumePayment?: boolean }> {
+    if (!eventData || !availability) {
+      throw new Error("El evento no está listo. Inténtalo de nuevo.");
     }
 
     const privacyAcceptedAt = payload.privacyAccepted ? new Date().toISOString() : null;
@@ -255,7 +275,7 @@ export default function EventDetailPage() {
 
     const { data: existingRegistration, error: existingRegistrationError } = await supabase
       .from("registrations")
-      .select("id")
+      .select("id,status")
       .eq("client_id", clientId)
       .eq("event_id", eventData.id)
       .maybeSingle();
@@ -265,7 +285,18 @@ export default function EventDetailPage() {
     }
 
     if (existingRegistration?.id) {
+      const existingStatus = existingRegistration.status;
+
+      if (existingStatus === "pending" && eventData.isPaid) {
+        await redirectToCheckout(String(existingRegistration.id));
+        return { registrationStatus: "pending", resumePayment: true };
+      }
+
       throw new Error("Ya estás registrado en este evento.");
+    }
+
+    if (availability.remainingSpots <= 0 && !eventData.waitlistEnabled) {
+      throw new Error("Este evento está agotado y la lista de espera no está activada.");
     }
 
     const registrationStatus: "confirmed" | "pending" | "waitlist" =
@@ -339,27 +370,7 @@ export default function EventDetailPage() {
       throw new Error(REGISTRATION_USER_ERROR);
     }
 
-    const checkoutResponse = await fetch("/api/create-checkout-session", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        registrationId: String(insertedRegistration.id),
-        eventSlug: eventData.slug,
-        eventTitle: eventData.title,
-        price: eventData.price,
-        clientEmail: payload.email,
-      }),
-    });
-
-    const checkoutBody = (await checkoutResponse.json()) as { url?: string; error?: string };
-    if (!checkoutResponse.ok || !checkoutBody.url) {
-      console.error("[registration] create checkout session failed:", checkoutBody.error ?? checkoutResponse.status);
-      throw new Error(REGISTRATION_USER_ERROR);
-    }
-
-    window.location.assign(checkoutBody.url);
+    await redirectToCheckout(String(insertedRegistration.id));
 
     return { registrationStatus: "pending" };
   }
@@ -433,9 +444,9 @@ export default function EventDetailPage() {
               <RegistrationForm
                 eventTitle={eventData.title}
                 onSubmit={handleRegister}
-                isDisabled={availability.status === "Sold out"}
+                isDisabled={availability.status === "Sold out" && !eventData.isPaid}
                 disabledMessage={
-                  availability.status === "Sold out"
+                  availability.status === "Sold out" && !eventData.isPaid
                     ? "Este evento está agotado y la lista de espera no está activada."
                     : undefined
                 }
