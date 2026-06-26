@@ -7,7 +7,6 @@ import { AdminShell } from "@/components/dashboard/admin-shell";
 import { formatPublicEventDateTime } from "@/lib/date-utils";
 import { getRemainingSpots } from "@/lib/event-capacity";
 import { getCancelRegistrationConfirmMessage, getRegistrationStatusLabel, labels } from "@/lib/labels";
-import { resolveRegistrationPaymentStatus } from "@/lib/registration-utils";
 import { supabase } from "@/lib/supabase";
 
 type SupabaseEventRow = {
@@ -339,94 +338,6 @@ export default function AdminAttendeesPage() {
     }
   }
 
-  async function promoteFirstWaitlistAfterSpotFreed() {
-    if (!eventRow) return;
-
-    const { data: waitlistRows, error: waitlistError } = await supabase
-      .from("registrations")
-      .select("id,client_id")
-      .eq("event_id", String(eventRow.id))
-      .eq("status", "waitlist")
-      .order("created_at", { ascending: true })
-      .limit(1);
-
-    const hasWaitlist = !waitlistError && (waitlistRows?.length ?? 0) > 0;
-    if (!hasWaitlist) {
-      setFeedbackMessage({ level: "success", message: labels.cancelRegistrationDone });
-      return;
-    }
-
-    if (isPaidEvent) {
-      const firstWaitlist = waitlistRows![0] as { id: string | number };
-      const paymentResult = await requestWaitlistPaymentLink({
-        registrationId: String(firstWaitlist.id),
-        requireAvailableSpot: true,
-        successMessage: labels.cancelRegistrationWaitlistPaymentSent,
-      });
-      setFeedbackMessage(paymentResult);
-      return;
-    }
-
-    const firstWaitlist = waitlistRows![0] as { id: string | number; client_id: string | number | null };
-    const { error: promoteError } = await supabase
-      .from("registrations")
-      .update({
-        status: "confirmed",
-        payment_status: resolveRegistrationPaymentStatus("confirmed", false),
-      })
-      .eq("id", firstWaitlist.id);
-
-    if (promoteError) {
-      console.error("[waitlist] Failed to promote waitlist registration:", promoteError.message);
-      setErrorMessage(labels.couldNotCancelRegistration);
-      return;
-    }
-
-    let emailSent = true;
-    if (firstWaitlist.client_id) {
-      const { data: clientRow } = await supabase
-        .from("clients")
-        .select("full_name,email")
-        .eq("id", firstWaitlist.client_id)
-        .maybeSingle();
-
-      if (clientRow?.email) {
-        try {
-          const emailResponse = await fetch("/api/send-waitlist-promotion", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              fullName: clientRow.full_name ?? "Asistente",
-              email: clientRow.email,
-              eventTitle: eventRow.title ?? eventRow.slug ?? "Evento",
-              eventDate: eventRow.event_date ?? "Por confirmar",
-              eventTime: eventRow.event_time,
-              eventLocation: eventRow.location,
-            }),
-          });
-
-          if (!emailResponse.ok) {
-            emailSent = false;
-            console.warn(
-              "[email] Waitlist promotion confirmation email failed:",
-              emailResponse.status,
-            );
-          }
-        } catch (emailError) {
-          emailSent = false;
-          console.error("[email] Waitlist promotion confirmation email failed:", emailError);
-        }
-      }
-    }
-
-    setFeedbackMessage({
-      level: emailSent ? "success" : "warning",
-      message: emailSent
-        ? labels.cancelRegistrationWaitlistPromoted
-        : labels.cancelRegistrationWaitlistPromotedEmailFailed,
-    });
-  }
-
   async function handleCancelRegistration(attendee: AttendeeView) {
     if (!eventRow) return;
     if (attendee.status === "cancelled") return;
@@ -440,24 +351,31 @@ export default function AdminAttendeesPage() {
     setFeedbackMessage(null);
 
     try {
-      const candidateId = Number.isFinite(Number(attendee.id)) ? Number(attendee.id) : attendee.id;
-      const { error: cancelError } = await supabase
-        .from("registrations")
-        .update({ status: "cancelled" })
-        .eq("id", candidateId);
+      const response = await fetch("/api/admin/cancel-registration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ registrationId: attendee.id }),
+      });
 
-      if (cancelError) {
-        setErrorMessage(labels.couldNotCancelRegistration);
+      const body = (await response.json()) as {
+        ok?: boolean;
+        level?: "success" | "warning" | "error";
+        message?: string;
+      };
+
+      if (!response.ok || body.ok === false) {
+        setErrorMessage(body.message ?? labels.couldNotCancelRegistration);
         return;
       }
 
-      if (attendee.status === "confirmed" || (isPaidEvent && attendee.status === "pending")) {
-        await promoteFirstWaitlistAfterSpotFreed();
-      } else {
-        setFeedbackMessage({ level: "success", message: labels.cancelRegistrationDone });
-      }
-
+      setFeedbackMessage({
+        level: body.level ?? "success",
+        message: body.message ?? labels.cancelRegistrationDone,
+      });
       await refreshAttendees();
+    } catch (error) {
+      console.error("[admin] Cancel registration request failed:", error);
+      setErrorMessage(labels.couldNotCancelRegistration);
     } finally {
       setCancellingId(null);
     }

@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { buildConfirmationEmailFooterHtml } from "@/lib/email/confirmation-email-footer";
+import { getEmailFromAddress } from "@/lib/email/get-from-address";
 
 export type SendEventConfirmationEmailParams = {
   to: string;
@@ -33,6 +35,7 @@ function buildEmailHtml(params: SendEventConfirmationEmailParams): string {
       <p><strong>Fecha:</strong> ${params.eventDate}</p>
       ${timeRow}
       ${locationRow}
+      ${buildConfirmationEmailFooterHtml()}
     </div>
   `;
 }
@@ -60,7 +63,7 @@ export async function sendEventConfirmationEmail(
     return { success: false, error };
   }
 
-  const from = process.env.EMAIL_FROM?.trim() ?? "Woxpat <hola@woxpat.com>";
+  const from = getEmailFromAddress();
   const to = params.to.trim();
 
   if (!to) {

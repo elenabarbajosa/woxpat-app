@@ -1,5 +1,6 @@
 import { isAllowedAdminEmail } from "@/lib/admin-auth";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 type LoginBody = {
   email?: string;
@@ -25,6 +26,15 @@ export async function POST(request: Request) {
   if (!isAllowedAdminEmail(data.user.email)) {
     await supabase.auth.signOut();
     return Response.json({ error: "Email o contraseña incorrectos" }, { status: 403 });
+  }
+
+  try {
+    const serviceClient = createServiceClient();
+    await serviceClient.rpc("upsert_admin_allowlist_email", {
+      p_email: data.user.email,
+    });
+  } catch (syncError) {
+    console.error("[auth] Failed to sync admin allowlist:", syncError);
   }
 
   return Response.json({ success: true });

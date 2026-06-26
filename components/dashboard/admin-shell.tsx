@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { labels } from "@/lib/labels";
 import { supabase } from "@/lib/supabase";
 
@@ -30,6 +31,10 @@ export function AdminShell({ title, subtitle, actions, children }: AdminShellPro
     pathname === "/" ||
     pathname === "/admin" ||
     (pathname.startsWith("/admin/events/") && !isCreateEvent && !isCommunity);
+
+  useEffect(() => {
+    void fetch("/api/admin/sync-allowlist", { method: "POST" });
+  }, []);
 
   async function handleLogout() {
     await supabase.auth.signOut();

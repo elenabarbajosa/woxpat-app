@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { buildConfirmationEmailFooterHtml } from "@/lib/email/confirmation-email-footer";
+import { getEmailFromAddress } from "@/lib/email/get-from-address";
 
 export type SendWaitlistPromotionConfirmationParams = {
   to: string;
@@ -31,8 +33,7 @@ function buildWaitlistPromotionHtml(params: SendWaitlistPromotionConfirmationPar
       <p>Se ha liberado una plaza para <strong>${eventName}</strong> y tu inscripción ha pasado de lista de espera a confirmada.</p>
       <p>${scheduleLine}</p>
       ${locationLine}
-      <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 24px 0;" />
-      <p>Gracias,<br /><strong>Woxpat</strong></p>
+      ${buildConfirmationEmailFooterHtml()}
     </div>
   `;
 }
@@ -47,7 +48,7 @@ export async function sendWaitlistPromotionConfirmationEmail(
     return { success: false, error };
   }
 
-  const from = process.env.EMAIL_FROM?.trim() ?? "Woxpat <hola@woxpat.com>";
+  const from = getEmailFromAddress();
   const to = params.to.trim();
 
   if (!to) {

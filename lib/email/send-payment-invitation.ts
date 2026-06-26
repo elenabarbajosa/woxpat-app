@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { getEmailFromAddress } from "@/lib/email/get-from-address";
 
 export type SendPaymentInvitationEmailParams = {
   to: string;
@@ -37,7 +38,7 @@ export async function sendPaymentInvitationEmail(
     return { success: false, error };
   }
 
-  const from = process.env.EMAIL_FROM?.trim() ?? "Woxpat <hola@woxpat.com>";
+  const from = getEmailFromAddress();
   const to = params.to.trim();
 
   if (!to) {

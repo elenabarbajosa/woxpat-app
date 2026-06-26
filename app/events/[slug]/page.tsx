@@ -13,11 +13,7 @@ import { PublicShell } from "@/components/layout/public-shell";
 import { formatPublicEventDateTime } from "@/lib/date-utils";
 import { getEventStatus } from "@/lib/event-utils";
 import { labels } from "@/lib/labels";
-import {
-  REGISTRATION_USER_ERROR,
-  registrationUserError,
-  resolveRegistrationPaymentStatus,
-} from "@/lib/registration-utils";
+import { REGISTRATION_USER_ERROR } from "@/lib/registration-utils";
 import { supabase } from "@/lib/supabase";
 import type { EventCategory, EventStatus, EventType } from "@/lib/types";
 
@@ -125,31 +121,25 @@ export default function EventDetailPage() {
       const mappedEvent = mapEventRow(eventRow as SupabaseEventRow);
       setEventData(mappedEvent);
 
-      const [{ count: confirmed, error: confirmedError }, pendingResult] = await Promise.all([
-        supabase
-          .from("registrations")
-          .select("id", { count: "exact", head: true })
-          .eq("event_id", mappedEvent.id)
-          .eq("status", "confirmed"),
-        mappedEvent.isPaid
-          ? supabase
-              .from("registrations")
-              .select("id", { count: "exact", head: true })
-              .eq("event_id", mappedEvent.id)
-              .eq("status", "pending")
-          : Promise.resolve({ count: 0, error: null }),
-      ]);
+      const eventIdNumeric = Number(mappedEvent.id);
+      const { data: countData, error: countError } = Number.isFinite(eventIdNumeric)
+        ? await supabase.rpc("get_event_registration_counts", { p_event_id: eventIdNumeric })
+        : { data: null, error: { message: "Invalid event id" } };
 
       if (!isMounted) return;
 
-      if (confirmedError || pendingResult.error) {
+      if (countError) {
         setErrorMessage("No se pudo cargar la disponibilidad del evento.");
         setIsLoading(false);
         return;
       }
 
-      setConfirmedCount(confirmed ?? 0);
-      setPendingCount(pendingResult.count ?? 0);
+      const counts = (countData ?? { confirmed: 0, pending: 0 }) as {
+        confirmed?: number;
+        pending?: number;
+      };
+      setConfirmedCount(Number(counts.confirmed ?? 0));
+      setPendingCount(mappedEvent.isPaid ? Number(counts.pending ?? 0) : 0);
       setIsLoading(false);
     }
 
@@ -219,108 +209,47 @@ export default function EventDetailPage() {
       throw new Error("El evento no está listo. Inténtalo de nuevo.");
     }
 
-    const privacyAcceptedAt = payload.privacyAccepted ? new Date().toISOString() : null;
+    const registerResponse = await fetch("/api/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        eventSlug: eventData.slug,
+        fullName: payload.fullName,
+        email: payload.email,
+        phone: payload.phone,
+        marketingConsent: payload.marketingConsent,
+        privacyAccepted: payload.privacyAccepted,
+      }),
+    });
 
-    const { data: existingClient, error: existingClientError } = await supabase
-      .from("clients")
-      .select("id")
-      .eq("email", payload.email)
-      .limit(1);
+    const registerBody = (await registerResponse.json()) as {
+      error?: string;
+      registrationStatus?: "confirmed" | "waitlist" | "pending";
+      registrationId?: string;
+      resumePayment?: boolean;
+      event?: {
+        title: string;
+        date: string;
+        time: string;
+        location: string;
+        isPaid: boolean;
+      };
+    };
 
-    if (existingClientError) {
-      throw registrationUserError("verify client profile", existingClientError);
+    if (!registerResponse.ok) {
+      throw new Error(registerBody.error ?? REGISTRATION_USER_ERROR);
     }
 
-    let clientId = existingClient?.[0]?.id as string | number | undefined;
+    const registrationStatus = registerBody.registrationStatus;
+    const registrationId = registerBody.registrationId;
 
-    if (clientId) {
-      const { error: updateClientError } = await supabase
-        .from("clients")
-        .update({
-          full_name: payload.fullName,
-          email: payload.email,
-          phone: payload.phone || null,
-          marketing_consent: payload.marketingConsent,
-          privacy_accepted: payload.privacyAccepted,
-          privacy_accepted_at: privacyAcceptedAt,
-        })
-        .eq("id", clientId);
-
-      if (updateClientError) {
-        throw registrationUserError("update client profile", updateClientError);
-      }
-    } else {
-      const { data: insertedClient, error: insertClientError } = await supabase
-        .from("clients")
-        .insert({
-          full_name: payload.fullName,
-          email: payload.email,
-          phone: payload.phone || null,
-          marketing_consent: payload.marketingConsent,
-          privacy_accepted: payload.privacyAccepted,
-          privacy_accepted_at: privacyAcceptedAt,
-        })
-        .select("id")
-        .single();
-
-      if (insertClientError || !insertedClient?.id) {
-        throw registrationUserError("create client profile", insertClientError);
-      }
-
-      clientId = insertedClient.id as string | number;
+    if (!registrationStatus || !registrationId) {
+      throw new Error(REGISTRATION_USER_ERROR);
     }
 
-    const requestedRegistrationStatus: "confirmed" | "waitlist" =
-      availability.remainingSpots > 0 ? "confirmed" : "waitlist";
-
-    const { data: existingRegistration, error: existingRegistrationError } = await supabase
-      .from("registrations")
-      .select("id,status")
-      .eq("client_id", clientId)
-      .eq("event_id", eventData.id)
-      .maybeSingle();
-
-    if (existingRegistrationError) {
-      throw registrationUserError("verify existing registration", existingRegistrationError);
-    }
-
-    if (existingRegistration?.id) {
-      const existingStatus = existingRegistration.status;
-
-      if (existingStatus === "pending" && eventData.isPaid) {
-        await redirectToCheckout(String(existingRegistration.id));
-        return { registrationStatus: "pending", resumePayment: true };
-      }
-
-      throw new Error("Ya estás registrado en este evento.");
-    }
-
-    if (availability.remainingSpots <= 0 && !eventData.waitlistEnabled) {
-      throw new Error("Este evento está agotado y la lista de espera no está activada.");
-    }
-
-    const registrationStatus: "confirmed" | "pending" | "waitlist" =
-      requestedRegistrationStatus === "waitlist"
-        ? "waitlist"
-        : eventData.isPaid
-          ? "pending"
-          : "confirmed";
-
-    const paymentStatus = resolveRegistrationPaymentStatus(registrationStatus, eventData.isPaid);
-
-    const { data: insertedRegistration, error: registrationError } = await supabase
-      .from("registrations")
-      .insert({
-        client_id: clientId,
-        event_id: eventData.id,
-        status: registrationStatus,
-        payment_status: paymentStatus,
-      })
-      .select("id")
-      .single();
-
-    if (registrationError) {
-      throw registrationUserError("insert registration", registrationError);
+    if (registerBody.resumePayment && eventData.isPaid) {
+      await redirectToCheckout(registrationId);
+      return { registrationStatus: "pending", resumePayment: true };
     }
 
     if (registrationStatus === "confirmed") {
@@ -347,7 +276,7 @@ export default function EventDetailPage() {
             phone: payload.phone,
             marketingConsent: payload.marketingConsent,
             privacyAccepted: payload.privacyAccepted,
-            registrationId: insertedRegistration.id,
+            registrationId,
           }),
         });
 
@@ -366,11 +295,7 @@ export default function EventDetailPage() {
       return { registrationStatus: registrationStatus === "waitlist" ? "waitlist" : "confirmed" };
     }
 
-    if (!insertedRegistration?.id) {
-      throw new Error(REGISTRATION_USER_ERROR);
-    }
-
-    await redirectToCheckout(String(insertedRegistration.id));
+    await redirectToCheckout(registrationId);
 
     return { registrationStatus: "pending" };
   }

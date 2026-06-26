@@ -1,5 +1,6 @@
 import { isAllowedAdminEmail } from "@/lib/admin-auth";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import {
   sendWaitlistPaymentLink,
   WAITLIST_PAYMENT_MESSAGES,
@@ -15,11 +16,11 @@ type SendWaitlistPaymentLinkBody = {
 };
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
+  const authClient = await createClient();
   const {
     data: { user },
     error: userError,
-  } = await supabase.auth.getUser();
+  } = await authClient.auth.getUser();
 
   if (userError || !user || !isAllowedAdminEmail(user.email)) {
     return Response.json({ ok: false, level: "error", message: "No autorizado." }, { status: 401 });
@@ -43,11 +44,21 @@ export async function POST(request: Request) {
     );
   }
 
+  let serviceSupabase;
+  try {
+    serviceSupabase = createServiceClient();
+  } catch {
+    return Response.json(
+      { ok: false, level: "error", message: WAITLIST_PAYMENT_MESSAGES.updateFailed },
+      { status: 500 },
+    );
+  }
+
   const candidateRegistrationId = Number.isFinite(Number(registrationId))
     ? Number(registrationId)
     : registrationId;
 
-  const { data: registrationRow, error: registrationError } = await supabase
+  const { data: registrationRow, error: registrationError } = await serviceSupabase
     .from("registrations")
     .select("id,client_id,event_id,status")
     .eq("id", candidateRegistrationId)
@@ -63,13 +74,13 @@ export async function POST(request: Request) {
 
   const [{ data: eventRow, error: eventError }, { data: clientRow, error: clientError }] =
     await Promise.all([
-      supabase
+      serviceSupabase
         .from("events")
         .select("id,title,slug,price,is_paid,capacity")
         .eq("id", registrationRow.event_id)
         .maybeSingle(),
       registrationRow.client_id
-        ? supabase
+        ? serviceSupabase
             .from("clients")
             .select("full_name,email")
             .eq("id", registrationRow.client_id)
@@ -86,7 +97,7 @@ export async function POST(request: Request) {
   }
 
   const result = await sendWaitlistPaymentLink({
-    supabase,
+    supabase: serviceSupabase,
     registrationId: candidateRegistrationId,
     event: eventRow as WaitlistPaymentEvent,
     client: clientRow as WaitlistPaymentClient,
