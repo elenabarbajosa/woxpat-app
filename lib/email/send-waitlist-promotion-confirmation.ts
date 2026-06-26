@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { formatDisplayEventTime } from "@/lib/date-utils";
 import { buildConfirmationEmailFooterHtml } from "@/lib/email/confirmation-email-footer";
 import { getEmailFromAddress } from "@/lib/email/get-from-address";
 
@@ -19,9 +20,9 @@ function buildWaitlistPromotionHtml(params: SendWaitlistPromotionConfirmationPar
   const greetingName = params.recipientName.trim() || "asistente";
   const eventName = params.eventName.trim() || "tu evento";
   const eventDate = params.eventDate.trim() || "próximamente";
-  const eventTime = params.eventTime?.trim();
-  const scheduleLine = eventTime
-    ? `Te esperamos el ${eventDate} a las ${eventTime}.`
+  const formattedTime = formatDisplayEventTime(params.eventTime);
+  const scheduleLine = formattedTime
+    ? `Te esperamos el ${eventDate} a las ${formattedTime}.`
     : `Te esperamos el ${eventDate}.`;
   const locationLine = params.eventLocation?.trim()
     ? `<p><strong>Ubicación:</strong> ${params.eventLocation.trim()}</p>`

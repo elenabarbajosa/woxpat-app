@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { formatDisplayEventTime } from "@/lib/date-utils";
 import { buildConfirmationEmailFooterHtml } from "@/lib/email/confirmation-email-footer";
 import { getEmailFromAddress } from "@/lib/email/get-from-address";
 
@@ -20,9 +21,8 @@ export type SendEventConfirmationEmailResult =
 
 function buildEmailHtml(params: SendEventConfirmationEmailParams): string {
   const greetingName = params.firstName.trim() || "asistente";
-  const timeRow = params.eventTime?.trim()
-    ? `<p><strong>Hora:</strong> ${params.eventTime.trim()}</p>`
-    : "";
+  const formattedTime = formatDisplayEventTime(params.eventTime);
+  const timeRow = formattedTime ? `<p><strong>Hora:</strong> ${formattedTime}</p>` : "";
   const locationRow = params.eventLocation?.trim()
     ? `<p><strong>Ubicación:</strong> ${params.eventLocation.trim()}</p>`
     : "";
