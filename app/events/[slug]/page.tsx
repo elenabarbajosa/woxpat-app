@@ -121,10 +121,12 @@ export default function EventDetailPage() {
       const mappedEvent = mapEventRow(eventRow as SupabaseEventRow);
       setEventData(mappedEvent);
 
-      const eventIdNumeric = Number(mappedEvent.id);
-      const { data: countData, error: countError } = Number.isFinite(eventIdNumeric)
-        ? await supabase.rpc("get_event_registration_counts", { p_event_id: eventIdNumeric })
-        : { data: null, error: { message: "Invalid event id" } };
+
+      const { data: countData, error: countError } = await supabase.rpc(
+        "get_event_registration_counts",
+        { p_event_id: mappedEvent.id },
+      );
+
 
       if (!isMounted) return;
 
